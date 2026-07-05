@@ -1,0 +1,442 @@
+// 按键加载函数实现
+int fmc_buttons_load(void)
+{
+    // 初始化所有按键为默认值
+    memset(fmc_buttons, 0, sizeof(fmc_buttons));
+
+    // ========== 屏幕左右选择键（左侧） ==========
+    fmc_buttons[FMC_KEY_SCREEN_L1].key = FMC_KEY_SCREEN_L1;
+    fmc_buttons[FMC_KEY_SCREEN_L1].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_SCREEN_L1].rect.x = 7;
+    fmc_buttons[FMC_KEY_SCREEN_L1].rect.y = 118;
+    fmc_buttons[FMC_KEY_SCREEN_L1].rect.w = SCREEN_WIDTH;
+    fmc_buttons[FMC_KEY_SCREEN_L1].rect.h = SCREEN_HEIGHT;
+    fmc_buttons[FMC_KEY_SCREEN_L1].label = "L1";
+    fmc_buttons[FMC_KEY_SCREEN_L1].on_click = fmc_handle_screen_l1;
+
+    fmc_buttons[FMC_KEY_SCREEN_L2].key = FMC_KEY_SCREEN_L2;
+    fmc_buttons[FMC_KEY_SCREEN_L2].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_SCREEN_L2].rect.x = 7;
+    fmc_buttons[FMC_KEY_SCREEN_L2].rect.y = 166;
+    fmc_buttons[FMC_KEY_SCREEN_L2].rect.w = SCREEN_WIDTH;
+    fmc_buttons[FMC_KEY_SCREEN_L2].rect.h = SCREEN_HEIGHT;
+    fmc_buttons[FMC_KEY_SCREEN_L2].label = "L2";
+    fmc_buttons[FMC_KEY_SCREEN_L2].on_click = fmc_handle_screen_l2;
+
+    fmc_buttons[FMC_KEY_SCREEN_L3].key = FMC_KEY_SCREEN_L3;
+    fmc_buttons[FMC_KEY_SCREEN_L3].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_SCREEN_L3].rect.x = 7;
+    fmc_buttons[FMC_KEY_SCREEN_L3].rect.y = 214;
+    fmc_buttons[FMC_KEY_SCREEN_L3].rect.w = SCREEN_WIDTH;
+    fmc_buttons[FMC_KEY_SCREEN_L3].rect.h = SCREEN_HEIGHT;
+    fmc_buttons[FMC_KEY_SCREEN_L3].label = "L3";
+    fmc_buttons[FMC_KEY_SCREEN_L3].on_click = fmc_handle_screen_l3;
+
+    fmc_buttons[FMC_KEY_SCREEN_L4].key = FMC_KEY_SCREEN_L4;
+    fmc_buttons[FMC_KEY_SCREEN_L4].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_SCREEN_L4].rect.x = 7;
+    fmc_buttons[FMC_KEY_SCREEN_L4].rect.y = 262;
+    fmc_buttons[FMC_KEY_SCREEN_L4].rect.w = SCREEN_WIDTH;
+    fmc_buttons[FMC_KEY_SCREEN_L4].rect.h = SCREEN_HEIGHT;
+    fmc_buttons[FMC_KEY_SCREEN_L4].label = "L4";
+    fmc_buttons[FMC_KEY_SCREEN_L4].on_click = fmc_handle_screen_l4;
+
+    fmc_buttons[FMC_KEY_SCREEN_L5].key = FMC_KEY_SCREEN_L5;
+    fmc_buttons[FMC_KEY_SCREEN_L5].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_SCREEN_L5].rect.x = 7;
+    fmc_buttons[FMC_KEY_SCREEN_L5].rect.y = 310;
+    fmc_buttons[FMC_KEY_SCREEN_L5].rect.w = SCREEN_WIDTH;
+    fmc_buttons[FMC_KEY_SCREEN_L5].rect.h = SCREEN_HEIGHT;
+    fmc_buttons[FMC_KEY_SCREEN_L5].label = "L5";
+    fmc_buttons[FMC_KEY_SCREEN_L5].on_click = fmc_handle_screen_l5;
+
+    fmc_buttons[FMC_KEY_SCREEN_L6].key = FMC_KEY_SCREEN_L6;
+    fmc_buttons[FMC_KEY_SCREEN_L6].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_SCREEN_L6].rect.x = 7;
+    fmc_buttons[FMC_KEY_SCREEN_L6].rect.y = 358;
+    fmc_buttons[FMC_KEY_SCREEN_L6].rect.w = SCREEN_WIDTH;
+    fmc_buttons[FMC_KEY_SCREEN_L6].rect.h = SCREEN_HEIGHT;
+    fmc_buttons[FMC_KEY_SCREEN_L6].label = "L6";
+    fmc_buttons[FMC_KEY_SCREEN_L6].on_click = fmc_handle_screen_l6;
+
+    // ========== 屏幕左右选择键（右侧） ==========
+    fmc_buttons[FMC_KEY_SCREEN_R1].key = FMC_KEY_SCREEN_R1;
+    fmc_buttons[FMC_KEY_SCREEN_R1].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_SCREEN_R1].rect.x = 587;
+    fmc_buttons[FMC_KEY_SCREEN_R1].rect.y = 118;
+    fmc_buttons[FMC_KEY_SCREEN_R1].rect.w = SCREEN_WIDTH;
+    fmc_buttons[FMC_KEY_SCREEN_R1].rect.h = SCREEN_HEIGHT;
+    fmc_buttons[FMC_KEY_SCREEN_R1].label = "R1";
+    fmc_buttons[FMC_KEY_SCREEN_R1].on_click = fmc_handle_screen_r1;
+
+    fmc_buttons[FMC_KEY_SCREEN_R2].key = FMC_KEY_SCREEN_R2;
+    fmc_buttons[FMC_KEY_SCREEN_R2].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_SCREEN_R2].rect.x = 587;
+    fmc_buttons[FMC_KEY_SCREEN_R2].rect.y = 166;
+    fmc_buttons[FMC_KEY_SCREEN_R2].rect.w = SCREEN_WIDTH;
+    fmc_buttons[FMC_KEY_SCREEN_R2].rect.h = SCREEN_HEIGHT;
+    fmc_buttons[FMC_KEY_SCREEN_R2].label = "R2";
+    fmc_buttons[FMC_KEY_SCREEN_R2].on_click = fmc_handle_screen_r2;
+
+    fmc_buttons[FMC_KEY_SCREEN_R3].key = FMC_KEY_SCREEN_R3;
+    fmc_buttons[FMC_KEY_SCREEN_R3].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_SCREEN_R3].rect.x = 587;
+    fmc_buttons[FMC_KEY_SCREEN_R3].rect.y = 214;
+    fmc_buttons[FMC_KEY_SCREEN_R3].rect.w = SCREEN_WIDTH;
+    fmc_buttons[FMC_KEY_SCREEN_R3].rect.h = SCREEN_HEIGHT;
+    fmc_buttons[FMC_KEY_SCREEN_R3].label = "R3";
+    fmc_buttons[FMC_KEY_SCREEN_R3].on_click = fmc_handle_screen_r3;
+
+    fmc_buttons[FMC_KEY_SCREEN_R4].key = FMC_KEY_SCREEN_R4;
+    fmc_buttons[FMC_KEY_SCREEN_R4].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_SCREEN_R4].rect.x = 587;
+    fmc_buttons[FMC_KEY_SCREEN_R4].rect.y = 262;
+    fmc_buttons[FMC_KEY_SCREEN_R4].rect.w = SCREEN_WIDTH;
+    fmc_buttons[FMC_KEY_SCREEN_R4].rect.h = SCREEN_HEIGHT;
+    fmc_buttons[FMC_KEY_SCREEN_R4].label = "R4";
+    fmc_buttons[FMC_KEY_SCREEN_R4].on_click = fmc_handle_screen_r4;
+
+    fmc_buttons[FMC_KEY_SCREEN_R5].key = FMC_KEY_SCREEN_R5;
+    fmc_buttons[FMC_KEY_SCREEN_R5].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_SCREEN_R5].rect.x = 587;
+    fmc_buttons[FMC_KEY_SCREEN_R5].rect.y = 310;
+    fmc_buttons[FMC_KEY_SCREEN_R5].rect.w = SCREEN_WIDTH;
+    fmc_buttons[FMC_KEY_SCREEN_R5].rect.h = SCREEN_HEIGHT;
+    fmc_buttons[FMC_KEY_SCREEN_R5].label = "R5";
+    fmc_buttons[FMC_KEY_SCREEN_R5].on_click = fmc_handle_screen_r5;
+
+    fmc_buttons[FMC_KEY_SCREEN_R6].key = FMC_KEY_SCREEN_R6;
+    fmc_buttons[FMC_KEY_SCREEN_R6].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_SCREEN_R6].rect.x = 587;
+    fmc_buttons[FMC_KEY_SCREEN_R6].rect.y = 358;
+    fmc_buttons[FMC_KEY_SCREEN_R6].rect.w = SCREEN_WIDTH;
+    fmc_buttons[FMC_KEY_SCREEN_R6].rect.h = SCREEN_HEIGHT;
+    fmc_buttons[FMC_KEY_SCREEN_R6].label = "R6";
+    fmc_buttons[FMC_KEY_SCREEN_R6].on_click = fmc_handle_screen_r6;
+
+    // ========== 功能按键 ==========
+    // 第一行
+    fmc_buttons[FMC_KEY_INIT_REF].key = FMC_KEY_INIT_REF;
+    fmc_buttons[FMC_KEY_INIT_REF].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_INIT_REF].rect.x = 69;
+    fmc_buttons[FMC_KEY_INIT_REF].rect.y = 477;
+    fmc_buttons[FMC_KEY_INIT_REF].rect.w = FUNCTION_WIDTH;
+    fmc_buttons[FMC_KEY_INIT_REF].rect.h = FUNCTION_HEIGHT;
+    fmc_buttons[FMC_KEY_INIT_REF].label = "INIT REF";
+    fmc_buttons[FMC_KEY_INIT_REF].on_click = fmc_handle_init_ref;
+
+    fmc_buttons[FMC_KEY_RTE].key = FMC_KEY_RTE;
+    fmc_buttons[FMC_KEY_RTE].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_RTE].rect.x = 153;
+    fmc_buttons[FMC_KEY_RTE].rect.y = 477;
+    fmc_buttons[FMC_KEY_RTE].rect.w = FUNCTION_WIDTH;
+    fmc_buttons[FMC_KEY_RTE].rect.h = FUNCTION_HEIGHT;
+    fmc_buttons[FMC_KEY_RTE].label = "RTE";
+    fmc_buttons[FMC_KEY_RTE].on_click = fmc_handle_rte;
+
+    fmc_buttons[FMC_KEY_CLB].key = FMC_KEY_CLB;
+    fmc_buttons[FMC_KEY_CLB].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_CLB].rect.x = 235;
+    fmc_buttons[FMC_KEY_CLB].rect.y = 477;
+    fmc_buttons[FMC_KEY_CLB].rect.w = FUNCTION_WIDTH;
+    fmc_buttons[FMC_KEY_CLB].rect.h = FUNCTION_HEIGHT;
+    fmc_buttons[FMC_KEY_CLB].label = "CLB";
+    fmc_buttons[FMC_KEY_CLB].on_click = fmc_handle_clb;
+
+    fmc_buttons[FMC_KEY_CRZ].key = FMC_KEY_CRZ;
+    fmc_buttons[FMC_KEY_CRZ].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_CRZ].rect.x = 318;
+    fmc_buttons[FMC_KEY_CRZ].rect.y = 477;
+    fmc_buttons[FMC_KEY_CRZ].rect.w = FUNCTION_WIDTH;
+    fmc_buttons[FMC_KEY_CRZ].rect.h = FUNCTION_HEIGHT;
+    fmc_buttons[FMC_KEY_CRZ].label = "CRZ";
+    fmc_buttons[FMC_KEY_CRZ].on_click = fmc_handle_crz;
+
+    fmc_buttons[FMC_KEY_DES].key = FMC_KEY_DES;
+    fmc_buttons[FMC_KEY_DES].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_DES].rect.x = 401;
+    fmc_buttons[FMC_KEY_DES].rect.y = 477;
+    fmc_buttons[FMC_KEY_DES].rect.w = FUNCTION_WIDTH;
+    fmc_buttons[FMC_KEY_DES].rect.h = FUNCTION_HEIGHT;
+    fmc_buttons[FMC_KEY_DES].label = "DES";
+    fmc_buttons[FMC_KEY_DES].on_click = fmc_handle_des;
+    // 第二行
+    fmc_buttons[FMC_KEY_DIR_INTC].key = FMC_KEY_DIR_INTC;
+    fmc_buttons[FMC_KEY_DIR_INTC].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_DIR_INTC].rect.x = 69;
+    fmc_buttons[FMC_KEY_DIR_INTC].rect.y = 536;
+    fmc_buttons[FMC_KEY_DIR_INTC].rect.w = FUNCTION_WIDTH;
+    fmc_buttons[FMC_KEY_DIR_INTC].rect.h = FUNCTION_HEIGHT;
+    fmc_buttons[FMC_KEY_DIR_INTC].label = "DIR INTC";
+    fmc_buttons[FMC_KEY_DIR_INTC].on_click = fmc_handle_dir_intc;
+
+    fmc_buttons[FMC_KEY_LEGS].key = FMC_KEY_LEGS;
+    fmc_buttons[FMC_KEY_LEGS].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_LEGS].rect.x = 153;
+    fmc_buttons[FMC_KEY_LEGS].rect.y = 536;
+    fmc_buttons[FMC_KEY_LEGS].rect.w = FUNCTION_WIDTH;
+    fmc_buttons[FMC_KEY_LEGS].rect.h = FUNCTION_HEIGHT;
+    fmc_buttons[FMC_KEY_LEGS].label = "LEGS";
+    fmc_buttons[FMC_KEY_LEGS].on_click = fmc_handle_legs;
+
+    fmc_buttons[FMC_KEY_DEP_ARR].key = FMC_KEY_DEP_ARR;
+    fmc_buttons[FMC_KEY_DEP_ARR].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_DEP_ARR].rect.x = 235;
+    fmc_buttons[FMC_KEY_DEP_ARR].rect.y = 536;
+    fmc_buttons[FMC_KEY_DEP_ARR].rect.w = FUNCTION_WIDTH;
+    fmc_buttons[FMC_KEY_DEP_ARR].rect.h = FUNCTION_HEIGHT;
+    fmc_buttons[FMC_KEY_DEP_ARR].label = "DEP ARR";
+    fmc_buttons[FMC_KEY_DEP_ARR].on_click = fmc_handle_dep_arr;
+
+    fmc_buttons[FMC_KEY_HOLD].key = FMC_KEY_HOLD;
+    fmc_buttons[FMC_KEY_HOLD].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_HOLD].rect.x = 318;
+    fmc_buttons[FMC_KEY_HOLD].rect.y = 536;
+    fmc_buttons[FMC_KEY_HOLD].rect.w = FUNCTION_WIDTH;
+    fmc_buttons[FMC_KEY_HOLD].rect.h = FUNCTION_HEIGHT;
+    fmc_buttons[FMC_KEY_HOLD].label = "HOLD";
+    fmc_buttons[FMC_KEY_HOLD].on_click = fmc_handle_hold;
+
+    fmc_buttons[FMC_KEY_PROG].key = FMC_KEY_PROG;
+    fmc_buttons[FMC_KEY_PROG].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_PROG].rect.x = 401;
+    fmc_buttons[FMC_KEY_PROG].rect.y = 536;
+    fmc_buttons[FMC_KEY_PROG].rect.w = FUNCTION_WIDTH;
+    fmc_buttons[FMC_KEY_PROG].rect.h = FUNCTION_HEIGHT;
+    fmc_buttons[FMC_KEY_PROG].label = "PROG";
+    fmc_buttons[FMC_KEY_PROG].on_click = fmc_handle_prog;
+    // 第三行
+    fmc_buttons[FMC_KEY_FIX].key = FMC_KEY_FIX;
+    fmc_buttons[FMC_KEY_FIX].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_FIX].rect.x = 69;
+    fmc_buttons[FMC_KEY_FIX].rect.y = 595;
+    fmc_buttons[FMC_KEY_FIX].rect.w = FUNCTION_WIDTH;
+    fmc_buttons[FMC_KEY_FIX].rect.h = FUNCTION_HEIGHT;
+    fmc_buttons[FMC_KEY_FIX].label = "FIX";
+    fmc_buttons[FMC_KEY_FIX].on_click = fmc_handle_fix;
+
+    fmc_buttons[FMC_KEY_NAV_RAD].key = FMC_KEY_NAV_RAD;
+    fmc_buttons[FMC_KEY_NAV_RAD].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_NAV_RAD].rect.x = 153;
+    fmc_buttons[FMC_KEY_NAV_RAD].rect.y = 595;
+    fmc_buttons[FMC_KEY_NAV_RAD].rect.w = FUNCTION_WIDTH;
+    fmc_buttons[FMC_KEY_NAV_RAD].rect.h = FUNCTION_HEIGHT;
+    fmc_buttons[FMC_KEY_NAV_RAD].label = "NAV RAD";
+    fmc_buttons[FMC_KEY_NAV_RAD].on_click = fmc_handle_nav_rad;
+    // 第四行
+    fmc_buttons[FMC_KEY_PREV_PAGE].key = FMC_KEY_PREV_PAGE;
+    fmc_buttons[FMC_KEY_PREV_PAGE].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_PREV_PAGE].rect.x = 69;
+    fmc_buttons[FMC_KEY_PREV_PAGE].rect.y = 655;
+    fmc_buttons[FMC_KEY_PREV_PAGE].rect.w = FUNCTION_WIDTH;
+    fmc_buttons[FMC_KEY_PREV_PAGE].rect.h = FUNCTION_HEIGHT;
+    fmc_buttons[FMC_KEY_PREV_PAGE].label = "PREV PAGE";
+    fmc_buttons[FMC_KEY_PREV_PAGE].on_click = fmc_handle_prev_page;
+
+    fmc_buttons[FMC_KEY_NEXT_PAGE].key = FMC_KEY_NEXT_PAGE;
+    fmc_buttons[FMC_KEY_NEXT_PAGE].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_NEXT_PAGE].rect.x = 153;
+    fmc_buttons[FMC_KEY_NEXT_PAGE].rect.y = 655;
+    fmc_buttons[FMC_KEY_NEXT_PAGE].rect.w = FUNCTION_WIDTH;
+    fmc_buttons[FMC_KEY_NEXT_PAGE].rect.h = FUNCTION_HEIGHT;
+    fmc_buttons[FMC_KEY_NEXT_PAGE].label = "NEXT PAGE";
+    fmc_buttons[FMC_KEY_NEXT_PAGE].on_click = fmc_handle_next_page;
+
+    fmc_buttons[FMC_KEY_EXEC].key = FMC_KEY_EXEC;
+    fmc_buttons[FMC_KEY_EXEC].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_EXEC].rect.x = 500;
+    fmc_buttons[FMC_KEY_EXEC].rect.y = 550;
+    fmc_buttons[FMC_KEY_EXEC].rect.w = 70;
+    fmc_buttons[FMC_KEY_EXEC].rect.h = 34;
+    fmc_buttons[FMC_KEY_EXEC].label = "EXEC";
+    fmc_buttons[FMC_KEY_EXEC].on_click = fmc_handle_exec;
+
+    // ========== 字母按键 ==========
+    // A-Z 按键（按图中位置排列）
+    int letter_x = 263, letter_y = 613;
+    for (int i = 0; i < 26; ++i)
+    {
+        char label[2];
+        label[0] = 'A' + i;
+        label[1] = '\0';
+        fmc_buttons[FMC_KEY_A + i].key = FMC_KEY_A + i;
+        fmc_buttons[FMC_KEY_A + i].shape = FMC_SHAPE_RECT;
+        fmc_buttons[FMC_KEY_A + i].rect.x = letter_x + (i % 5) * 68;
+        fmc_buttons[FMC_KEY_A + i].rect.y = letter_y + (i / 5) * 62;
+        fmc_buttons[FMC_KEY_A + i].rect.w = LETTER_LENGTH;
+        fmc_buttons[FMC_KEY_A + i].rect.h = LETTER_LENGTH;
+        fmc_buttons[FMC_KEY_A + i].label = label;
+        switch (i)
+        {
+        case 0:
+            fmc_buttons[FMC_KEY_A].on_click = fmc_handle_a;
+            break;
+        case 1:
+            fmc_buttons[FMC_KEY_B].on_click = fmc_handle_b;
+            break;
+        case 2:
+            fmc_buttons[FMC_KEY_C].on_click = fmc_handle_c;
+            break;
+        case 3:
+            fmc_buttons[FMC_KEY_D].on_click = fmc_handle_d;
+            break;
+        case 4:
+            fmc_buttons[FMC_KEY_E].on_click = fmc_handle_e;
+            break;
+        case 5:
+            fmc_buttons[FMC_KEY_F].on_click = fmc_handle_f;
+            break;
+        case 6:
+            fmc_buttons[FMC_KEY_G].on_click = fmc_handle_g;
+            break;
+        case 7:
+            fmc_buttons[FMC_KEY_H].on_click = fmc_handle_h;
+            break;
+        case 8:
+            fmc_buttons[FMC_KEY_I].on_click = fmc_handle_i;
+            break;
+        case 9:
+            fmc_buttons[FMC_KEY_J].on_click = fmc_handle_j;
+            break;
+        case 10:
+            fmc_buttons[FMC_KEY_K].on_click = fmc_handle_k;
+            break;
+        case 11:
+            fmc_buttons[FMC_KEY_L].on_click = fmc_handle_l;
+            break;
+        case 12:
+            fmc_buttons[FMC_KEY_M].on_click = fmc_handle_m;
+            break;
+        case 13:
+            fmc_buttons[FMC_KEY_N].on_click = fmc_handle_n;
+            break;
+        case 14:
+            fmc_buttons[FMC_KEY_O].on_click = fmc_handle_o;
+            break;
+        case 15:
+            fmc_buttons[FMC_KEY_P].on_click = fmc_handle_p;
+            break;
+        case 16:
+            fmc_buttons[FMC_KEY_Q].on_click = fmc_handle_q;
+            break;
+        case 17:
+            fmc_buttons[FMC_KEY_R].on_click = fmc_handle_r;
+            break;
+        case 18:
+            fmc_buttons[FMC_KEY_S].on_click = fmc_handle_s;
+            break;
+        case 19:
+            fmc_buttons[FMC_KEY_T].on_click = fmc_handle_t;
+            break;
+        case 20:
+            fmc_buttons[FMC_KEY_U].on_click = fmc_handle_u;
+            break;
+        case 21:
+            fmc_buttons[FMC_KEY_V].on_click = fmc_handle_v;
+            break;
+        case 22:
+            fmc_buttons[FMC_KEY_W].on_click = fmc_handle_w;
+            break;
+        case 23:
+            fmc_buttons[FMC_KEY_X].on_click = fmc_handle_x;
+            break;
+        case 24:
+            fmc_buttons[FMC_KEY_Y].on_click = fmc_handle_y;
+            break;
+        case 25:
+            fmc_buttons[FMC_KEY_Z].on_click = fmc_handle_z;
+            break;
+        }
+    }
+
+    // ========== 数字/符号按键 ==========
+    int num_x = 89, num_y = 762;
+    const char *num_labels[] = {"1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "+/-"};
+    for (int i = 0; i < 12; ++i)
+    {
+        fmc_buttons[FMC_KEY_1 + i].key = FMC_KEY_1 + i;
+        fmc_buttons[FMC_KEY_1 + i].shape = FMC_SHAPE_CIRCLE;
+        fmc_buttons[FMC_KEY_1 + i].rect.x = num_x + (i % 3) * 62;
+        fmc_buttons[FMC_KEY_1 + i].rect.y = num_y + (i / 3) * 62;
+        fmc_buttons[FMC_KEY_1 + i].rect.w = NUMB_R;
+        fmc_buttons[FMC_KEY_1 + i].rect.h = NUMB_R;
+        fmc_buttons[FMC_KEY_1 + i].label = num_labels[i];
+        switch (i)
+        {
+        case 0:
+            fmc_buttons[FMC_KEY_1].on_click = fmc_handle_1;
+            break;
+        case 1:
+            fmc_buttons[FMC_KEY_2].on_click = fmc_handle_2;
+            break;
+        case 2:
+            fmc_buttons[FMC_KEY_3].on_click = fmc_handle_3;
+            break;
+        case 3:
+            fmc_buttons[FMC_KEY_4].on_click = fmc_handle_4;
+            break;
+        case 4:
+            fmc_buttons[FMC_KEY_5].on_click = fmc_handle_5;
+            break;
+        case 5:
+            fmc_buttons[FMC_KEY_6].on_click = fmc_handle_6;
+            break;
+        case 6:
+            fmc_buttons[FMC_KEY_7].on_click = fmc_handle_7;
+            break;
+        case 7:
+            fmc_buttons[FMC_KEY_8].on_click = fmc_handle_8;
+            break;
+        case 8:
+            fmc_buttons[FMC_KEY_9].on_click = fmc_handle_9;
+            break;
+        case 9:
+            fmc_buttons[FMC_KEY_DOT].on_click = fmc_handle_dot;
+            break;
+        case 10:
+            fmc_buttons[FMC_KEY_0].on_click = fmc_handle_0;
+            break;
+        case 11:
+            fmc_buttons[FMC_KEY_PLUS_MINUS].on_click = fmc_handle_plus_minus;
+            break;
+        }
+    }
+
+    // ========== 编辑按键 ==========
+    fmc_buttons[FMC_KEY_SP].key = FMC_KEY_SP;
+    fmc_buttons[FMC_KEY_SP].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_SP].rect.x = 333;
+    fmc_buttons[FMC_KEY_SP].rect.y = 924;
+    fmc_buttons[FMC_KEY_SP].rect.w = LETTER_LENGTH;
+    fmc_buttons[FMC_KEY_SP].rect.h = LETTER_LENGTH;
+    fmc_buttons[FMC_KEY_SP].label = "SP";
+    fmc_buttons[FMC_KEY_SP].on_click = fmc_handle_sp;
+    fmc_buttons[FMC_KEY_DEL].key = FMC_KEY_DEL;
+    fmc_buttons[FMC_KEY_DEL].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_DEL].rect.x = 401;
+    fmc_buttons[FMC_KEY_DEL].rect.y = 924;
+    fmc_buttons[FMC_KEY_DEL].rect.w = LETTER_LENGTH;
+    fmc_buttons[FMC_KEY_DEL].rect.h = LETTER_LENGTH;
+    fmc_buttons[FMC_KEY_DEL].label = "DEL";
+    fmc_buttons[FMC_KEY_DEL].on_click = fmc_handle_del;
+
+    fmc_buttons[FMC_KEY_SLASH].key = FMC_KEY_SLASH;
+    fmc_buttons[FMC_KEY_SLASH].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_SLASH].rect.x = 468;
+    fmc_buttons[FMC_KEY_SLASH].rect.y = 924;
+    fmc_buttons[FMC_KEY_SLASH].rect.w = LETTER_LENGTH;
+    fmc_buttons[FMC_KEY_SLASH].rect.h = LETTER_LENGTH;
+    fmc_buttons[FMC_KEY_SLASH].label = "/";
+    fmc_buttons[FMC_KEY_SLASH].on_click = fmc_handle_slash;
+
+    fmc_buttons[FMC_KEY_CLR].key = FMC_KEY_CLR;
+    fmc_buttons[FMC_KEY_CLR].shape = FMC_SHAPE_RECT;
+    fmc_buttons[FMC_KEY_CLR].rect.x = 534;
+    fmc_buttons[FMC_KEY_CLR].rect.y = 924;
+    fmc_buttons[FMC_KEY_CLR].rect.w = LETTER_LENGTH;
+    fmc_buttons[FMC_KEY_CLR].rect.h = LETTER_LENGTH;
+    fmc_buttons[FMC_KEY_CLR].label = "CLR";
+    fmc_buttons[FMC_KEY_CLR].on_click = fmc_handle_clr;
+
+    return 0;
+}

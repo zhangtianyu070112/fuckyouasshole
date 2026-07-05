@@ -1,0 +1,77 @@
+{
+  "_description": "X-Plane 12 Data Output group indices → field mapping. Extracted from Settings → Data Output screen.",
+  "_source": "X-Plane 12.0",
+  "_date": "2026-07-05",
+
+  "flight_params": {
+    "3":  { "name": "Speeds",                "fields": ["IAS_kts", null, null, "GS_kts", null, "TAS_kts", null, "VVI_fpm"] },
+    "4":  { "name": "Mach_VVI_Gload",        "fields": ["mach", "vs_fpm", null, null, null, null, null, "g_load"] },
+    "16": { "name": "AoA_sideslip_paths",     "fields": ["aoa_deg", "sideslip_deg", null, null, null, null, null, null] },
+    "17": { "name": "Pitch_roll_headings",   "fields": ["pitch_deg", "roll_deg", "heading_true_deg", "heading_mag_deg"] },
+    "20": { "name": "Lat_lon_altitude",      "fields": ["lat_deg", "lon_deg", "alt_msl_ft", "alt_agl_ft"] },
+    "21": { "name": "Location_velocity_dist", "fields": [null, null, null, null, null, null, null, null] }
+  },
+
+  "engine": {
+    "25": { "name": "Throttle_commanded",    "fields": ["throttle[0]", "throttle[1]", "throttle[2]", "throttle[3]"] },
+    "26": { "name": "Throttle_actual",       "fields": ["thr_actual[0]", "thr_actual[1]", "thr_actual[2]", "thr_actual[3]"] },
+    "41": { "name": "N1",                    "fields": ["n1_pct[0]", "n1_pct[1]", "n1_pct[2]", "n1_pct[3]"] },
+    "42": { "name": "N2",                    "fields": ["n2_pct[0]", "n2_pct[1]", "n2_pct[2]", "n2_pct[3]"] },
+    "45": { "name": "Fuel_flow",             "fields": ["fuel_flow_pph[0]", "fuel_flow_pph[1]", "fuel_flow_pph[2]", "fuel_flow_pph[3]"] },
+    "47": { "name": "EGT",                   "fields": ["egt_c[0]", "egt_c[1]", "egt_c[2]", "egt_c[3]"] },
+    "49": { "name": "Oil_pressure",          "fields": ["oil_press_psi[0]", "oil_press_psi[1]", "oil_press_psi[2]", "oil_press_psi[3]"] },
+    "50": { "name": "Oil_temperature",       "fields": ["oil_temp_c[0]", "oil_temp_c[1]", "oil_temp_c[2]", "oil_temp_c[3]"] },
+    "51": { "name": "Fuel_pressure",         "fields": ["fuel_press_psi[0]", null, null, null] },
+    "34": { "name": "Engine_power",          "fields": ["eng_power_watt[0]", null, null, null] },
+    "35": { "name": "Engine_thrust",         "fields": ["eng_thrust_lbf[0]", null, null, null] },
+    "37": { "name": "Engine_RPM",            "fields": ["eng_rpm[0]", null, null, null] },
+    "46": { "name": "ITT",                   "fields": ["itt_c[0]", null, null, null] }
+  },
+
+  "controls": {
+    "8":  { "name": "Joystick_aileron_elev_rudder", "fields": ["elevator_deg", "aileron_deg", "rudder_deg"] },
+    "13": { "name": "Trim_flaps_slats_speedbrakes",  "fields": ["flap_ratio", null, null, "speedbrake_ratio"] },
+    "14": { "name": "Gear_brakes",                   "fields": ["gear_ratio", "parking_brake", "brake_temp_left_c", "brake_temp_right_c"] },
+    "67": { "name": "Landing_gear_deployment",       "fields": ["gear_ratio", "gear_deployed"] }
+  },
+
+  "autopilot": {
+    "108": { "name": "AP_FD_HUD_switches",  "fields": ["ap_engaged", null, null, null, null, "ap_athr_engaged"] },
+    "117": { "name": "AP_modes",            "fields": [null, null, null, null, null, null, null, null] },
+    "118": { "name": "AP_values",           "fields": ["ap_hdg", "ap_alt", "ap_spd", "ap_vs"] }
+  },
+
+  "nav_com": {
+    "96":  { "name": "COM_frequencies",     "fields": ["com1_freq", "com2_freq"] },
+    "97":  { "name": "NAV_frequencies",     "fields": ["nav1_freq", "nav2_freq", "nav1_course", "nav2_course"] },
+    "98":  { "name": "NAV_OBS",             "fields": ["nav1_obs", "nav2_obs"] },
+    "99":  { "name": "Pilot_NAV1_deflections", "fields": ["nav1_cdi", null, null, null, null, null, null, null] },
+    "102": { "name": "DME_status",          "fields": ["dme_dist_nm", "dme_speed_kts"] },
+    "104": { "name": "Transponder_status",  "fields": ["xpdr_code", null, "xpdr_mode"] }
+  },
+
+  "systems": {
+    "6":   { "name": "METAR_clouds_winds_1", "fields": ["oat_c", null, null, "wind_speed_kts", "wind_dir_deg"] },
+    "55":  { "name": "Electric_fuel_pump",   "fields": ["fuel_pump_on[0]", "fuel_pump_on[1]"] },
+    "67":  { "name": "Landing_gear_deploy",  "fields": ["gear_ratio"] },
+    "109": { "name": "Anti_ice_switches",    "fields": ["anti_ice_wing", "anti_ice_eng[0]", "anti_ice_eng[1]"] },
+    "113": { "name": "General_annunciators_1", "fields": ["master_warning", "master_caution"] },
+    "115": { "name": "Engine_annunciators",  "fields": [null, null, null, null] },
+    "120": { "name": "Pressurization_status","fields": ["cabin_alt_ft", null, "cabin_diff_psi"] },
+    "121": { "name": "APU_GPU_status",       "fields": ["apu_n1_pct", "apu_egt_c", "apu_running", "elec_gen_amps[0]", "elec_gen_amps[1]", "elec_bus_volts"] },
+    "124": { "name": "Electrical_solar",     "fields": ["elec_gen_amps[0]", "elec_gen_amps[1]", "elec_bus_volts"] },
+    "127": { "name": "Warning_status",       "fields": ["master_warning", "master_caution"] }
+  },
+
+  "weather": {
+    "5":   { "name": "METAR_wind_dir_temp_precip", "fields": ["wind_speed_kts", "wind_dir_deg", null, "oat_c"] },
+    "6":   { "name": "METAR_clouds_winds_1",       "fields": ["wind_alt_ft[0]", "wind_speed_kts[0]", "wind_dir_deg[0]"] }
+  },
+
+  "_notes": {
+    "units": "XP12 uses imperial (ft, ft/min, lbs/hr, psi, °F→verify) natively. NO metric→imperial conversions needed.",
+    "N1_N2": "XP12 groups 41/42 send ratio (0.0-1.0). Multiply by 100 for percentage display.",
+    "mag_heading": "XP12 sends -999.0 when magnetic variation unavailable. Fall back to true heading.",
+    "deprecated_xp11_indices": "26→Throttle actual, 27→Feather/reverse, 34→Engine power, 35→Engine thrust, 36→Engine torque, 37→Engine RPM, 46→ITT, 63→(gone), 66→Weight, 67→Gear deploy, 68→L/D, 76→Yaw brake, 110→Anti-ice eng, 111→Clutch, 112→Misc switches, 114→Annun 2, 121→APU, 136→Joystick raw"
+  }
+}

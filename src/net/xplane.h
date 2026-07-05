@@ -1,0 +1,129 @@
+/**
+ * @file    xplane.h
+ * @brief   X-Plane 11 UDP DATA packet protocol handler.
+ *
+ * X-Plane 11 sends flight data via UDP in two modes:
+ *   - RPOS (request position): Prologue "RPOS" + 1-byte freq → X-Plane
+ *     replies with position data at that rate.
+ *   - DATA packets: Prologue "DATA" + 4-byte index + 8×4-byte floats.
+ *
+ * See: X-Plane/Resources/plugins/DataRefs.txt for data group indices.
+ *
+ * Common data group indices:
+ *    3 — Speeds (IAS, TAS, GS, VVI)
+ *    4 — Mach, VVI, g-load
+ *   17 — Pitch, roll, heading true, heading mag
+ *   18 — Pitch/roll/heading rates
+ *   20 — Latitude, longitude, altitude MSL, altitude AGL
+ *   25 — Throttle (1-4), mixture, prop
+ *   26 — Engine N1 % (1-4)
+ *   34 — Engine EGT °C (1-4)
+ *   37 — Engine fuel flow lbs/hr (1-4)
+ *   63 — Autopilot settings
+ *   67 — Barometric setting
+ *   68 — Wind speed/direction
+ *  111 — NAV1 frequency, NAV2 frequency, NAV1 course, NAV2 course
+ *  136 — Gear deployment ratio
+ */
+
+#ifndef XPLANE_H
+#define XPLANE_H
+
+#include "udp.h"
+#include "data/flight_data.h"
+
+#include <stdint.h>
+
+/* =========================================================================
+ *  X-Plane DATA packet format
+ * ========================================================================= */
+
+#define XP_DATA_PROLOGUE    "DATA"
+#define XP_DATA_PROLOGUE_LEN 5     /* "DATA\0" including null */
+#define XP_DATA_HEADER_LEN   9     /* 5 prologue + 4 index */
+#define XP_DATA_PACKET_LEN   41    /* 5 + 4 + 8*4 = 41 bytes */
+
+/**
+ * @brief Parse a raw X-Plane DATA packet and update flight data.
+ *
+ * Handles the "DATA" prologue format. Ignores non-DATA packets
+ * (e.g., RPOS response format).
+ *
+ * @param data   Raw UDP payload.
+ * @param len    Payload length.
+ * @param fd     Flight data to update (thread-safe).
+ */
+void xplane_parse_packet(const uint8_t* data, int len, FlightData* fd);
+
+/**
+ * @brief Send a subscription request to X-Plane.
+ *
+ * Sends an RPOS request so X-Plane starts streaming data to our port.
+ * X-Plane listens on its own UDP port for these commands.
+ *
+ * @param sock       Our UDP socket (for sending the request).
+ * @param xp_host    X-Plane host IP (e.g. "127.0.0.1").
+ * @param xp_port    X-Plane's receive port (default 49000).
+ * @param freq_hz    Data rate request (1-99 Hz).
+ * @return 0 on success, -1 on failure.
+ */
+int xplane_subscribe(UDPSocket* sock, const char* xp_host,
+                     int xp_port, int freq_hz);
+
+/**
+ * @brief Send a single float value to an X-Plane DataRef via native UDP DREF.
+ *
+ * This uses X-Plane's built-in DREF command on port 49000. No plugin required.
+ * Supports both scalar DataRefs (e.g. "sim/cockpit/autopilot/heading_mag")
+ * and indexed array elements (e.g. "sim/cockpit2/engine/actuators/throttle_ratio[0]").
+ *
+ * @param sock       Our UDP socket.
+ * @param xp_host    X-Plane host IP (e.g. "127.0.0.1").
+ * @param xp_port    X-Plane receive port (default 49000).
+ * @param dref_path  Full DataRef path string.
+ * @param value      Float value to set.
+ * @return 0 on success, -1 on failure.
+ */
+int xplane_send_dref(UDPSocket* sock, const char* xp_host, int xp_port,
+                     const char* dref_path, float value);
+
+/**
+ * @brief Send multiple float values to an X-Plane array DataRef.
+ *
+ * Use for setting entire arrays at once, e.g. all 4 throttle ratios:
+ *   float thr[] = {0.85f, 0.85f, 0.0f, 0.0f};
+ *   xplane_send_dref_array(sock, host, port,
+ *       "sim/cockpit2/engine/actuators/throttle_ratio", thr, 4);
+ *
+ * @param sock       Our UDP socket.
+ * @param xp_host    X-Plane host IP.
+ * @param xp_port    X-Plane receive port (default 49000).
+ * @param dref_path  Full DataRef path (without [N] index suffix).
+ * @param values     Array of float values.
+ * @param count      Number of values.
+ * @return 0 on success, -1 on failure.
+ */
+int xplane_send_dref_array(UDPSocket* sock, const char* xp_host, int xp_port,
+                           const char* dref_path, const float* values, int count);
+
+/**
+ * @brief Send an X-Plane command via native UDP CMND protocol.
+ *
+ * Format: "CMND\0" + command_path + "\0"
+ * This triggers an X-Plane command just like a joystick button or key binding.
+ *
+ * Examples:
+ *   xplane_send_command(sock, "127.0.0.1", 49000, "sim/FMS/key_A");
+ *   xplane_send_command(sock, "127.0.0.1", 49000, "sim/FMS/key_CLR");
+ *   xplane_send_command(sock, "127.0.0.1", 49000, "sim/autopilot/heading_sync");
+ *
+ * @param sock      Our UDP socket.
+ * @param xp_host   X-Plane host IP.
+ * @param xp_port   X-Plane receive port (default 49000).
+ * @param command   Full X-Plane command path string.
+ * @return 0 on success, -1 on failure.
+ */
+int xplane_send_command(UDPSocket* sock, const char* xp_host, int xp_port,
+                        const char* command);
+
+#endif /* XPLANE_H */
