@@ -495,12 +495,14 @@ void xplane_fmc_sync(const App* app)
     if (fp->cruise_altitude_ft > 100.0f) {
         xplane_send_dref(app->xp_send_sock, host, port,
             "sim/cockpit/autopilot/altitude", fp->cruise_altitude_ft);
+        SDL_Delay(15);  /* prevent XP12 UDP packet collision on port 49000 */
     }
 
     /* 2. Cruise speed (TAS) → autopilot airspeed (IAS knot, close enough) */
     if (fp->cruise_speed_kts > 50.0f) {
         xplane_send_dref(app->xp_send_sock, host, port,
             "sim/cockpit/autopilot/airspeed", fp->cruise_speed_kts);
+        SDL_Delay(15);
     }
 
     /* 3. First leg bearing → autopilot heading */

@@ -498,73 +498,72 @@ int xplane_subscribe(UDPSocket* sock, const char* xp_host,
 }
 
 /* =========================================================================
- *  DREF write functions (native X-Plane UDP, no plugin required)
+ *  DREF write functions (native X-Plane 12 UDP, no plugin required)
  * ========================================================================= */
 
 /**
- * X-Plane native DREF UDP packet format (port 49000, no plugin required):
+ * X-Plane 12 native DREF UDP packet format (port 49000, FIXED 509 bytes):
  *
- *   [0..3]  "DREF"   4 ASCII bytes
- *   [4]     0x00     null terminator for the 4-char prologue
- *   [5..N]  dref_path\0  null-terminated DataRef path string
- *   [N+1..] float(s)  one or more IEEE 754 float32 little-endian
+ *   Offset  Size   Field
+ *   ------  ----   -----
+ *   0       5      "DREF\0"  (null-terminated header)
+ *   5       4      Value: 32-bit float (little-endian)
+ *   9       400    DataRef path string (null-padded to 400 bytes)
+ *   409     100    Zero padding
  *
- * For array DataRefs, simply append more floats. X-Plane knows the
- * array size from the DataRef definition and consumes accordingly.
+ *   TOTAL: 509 bytes (fixed — XP12 rejects variable-length DREF)
  *
- * Reference: X-Plane 11 UDP Reference (Instructions/X-Plane SPECS from Austin)
+ * NOTE: Only ONE float value per DREF in XP12 native protocol.
+ * For array datarefs, use the XPUIPC plugin instead.
+ *
+ * Reference: X-Plane 12 Instructions/Exchanging Data with X-Plane.rtfd
  */
+
+#define XP12_DREF_PATH_MAX  400
+#define XP12_DREF_PACKET_SZ 509
 
 int xplane_send_dref(UDPSocket* sock, const char* xp_host, int xp_port,
                      const char* dref_path, float value)
 {
-    return xplane_send_dref_array(sock, xp_host, xp_port, dref_path, &value, 1);
-}
-
-int xplane_send_dref_array(UDPSocket* sock, const char* xp_host, int xp_port,
-                           const char* dref_path, const float* values, int count)
-{
-    if (!sock || !xp_host || !dref_path || !values || count < 1) return -1;
-    if (count > 128) return -1;  /* sanity: no DataRef array is this large */
+    if (!sock || !xp_host || !dref_path) return -1;
 
     int path_len = (int)strlen(dref_path);
-    if (path_len < 1 || path_len > 400) return -1;
+    if (path_len < 1 || path_len >= XP12_DREF_PATH_MAX) return -1;
 
-    /* Build packet:
-     *   5 bytes  "DREF\0"
-     * + path_len + 1 bytes  (null-terminated dref path)
-     * + count * 4 bytes     (float values)
-     * Max ~ 5 + 401 + 512 = 918 bytes — well within UDP limits
-     */
-    uint8_t buf[2048];
-    int pos = 0;
+    uint8_t buf[XP12_DREF_PACKET_SZ];
+    memset(buf, 0, sizeof(buf));
 
-    /* Prologue: "DREF\0" */
-    memcpy(buf + pos, "DREF", 4);  pos += 4;
-    buf[pos++] = 0x00;
+    /* [0..4] "DREF\0" */
+    memcpy(buf, "DREF", 4);
 
-    /* DataRef path, null-terminated */
-    memcpy(buf + pos, dref_path, path_len);  pos += path_len;
-    buf[pos++] = '\0';
+    /* [5..8] float value (little-endian) */
+    uint32_t raw;
+    memcpy(&raw, &value, sizeof(raw));
+    buf[5] = (uint8_t)(raw & 0xFF);
+    buf[6] = (uint8_t)((raw >> 8) & 0xFF);
+    buf[7] = (uint8_t)((raw >> 16) & 0xFF);
+    buf[8] = (uint8_t)((raw >> 24) & 0xFF);
 
-    /* Float values (little-endian; x86 is natively LE so memcpy is safe) */
-    for (int i = 0; i < count; i++) {
-        float f = values[i];
-        uint32_t raw;
-        memcpy(&raw, &f, sizeof(raw));
-        buf[pos++] = (uint8_t)(raw & 0xFF);
-        buf[pos++] = (uint8_t)((raw >> 8) & 0xFF);
-        buf[pos++] = (uint8_t)((raw >> 16) & 0xFF);
-        buf[pos++] = (uint8_t)((raw >> 24) & 0xFF);
-    }
+    /* [9..408] DataRef path (null-padded to 400 bytes) */
+    memcpy(buf + 9, dref_path, (size_t)path_len);
+    /* rest is already zero from memset */
 
-    int ret = udp_socket_sendto(sock, buf, pos, xp_host, xp_port);
+    int ret = udp_socket_sendto(sock, buf, XP12_DREF_PACKET_SZ, xp_host, xp_port);
     if (ret > 0) {
         return 0;
     }
 
     LOG_WARN("xplane_send_dref: sendto failed for %s (ret=%d)", dref_path, ret);
     return -1;
+}
+
+/* Keep old array variant for backward compat — internally unused now */
+int xplane_send_dref_array(UDPSocket* sock, const char* xp_host, int xp_port,
+                           const char* dref_path, const float* values, int count)
+{
+    if (!sock || !xp_host || !dref_path || !values || count < 1) return -1;
+    /* XP12 only supports single-float DREF; forward first value */
+    return xplane_send_dref(sock, xp_host, xp_port, dref_path, values[0]);
 }
 
 /* =========================================================================
