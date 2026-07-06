@@ -23,6 +23,7 @@
 #include "instruments/standalone_nd.h"
 #include "instruments/standalone_eicas1.h"
 #include "instruments/standalone_eicas2.h"
+#include "instruments/eicas2.h"
 #include "data/flight_data.h"
 #include "data/navdata.h"
 #include "net/udp.h"
@@ -32,6 +33,7 @@
 #include "utils/font_manager.h"
 #include "cabin/cabin_server.h"
 
+#include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
 
 /* Instrument constructors (defined in their respective .c files) */
@@ -69,6 +71,9 @@ static int init_sdl(App* app)
         win_flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
     }
 
+    /* Enable linear scaling for better texture/font resizing */
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
+
     const char* title = config_get_str(app->config, "window", "title",
                                        "Flight Cockpit Simulation System");
 
@@ -101,10 +106,11 @@ static int init_sdl(App* app)
     int vsync = config_get_bool(app->config, "render", "vsync", 1);
     app->renderer = SDL_CreateRenderer(app->window, -1,
                                         SDL_RENDERER_ACCELERATED |
+                                        SDL_RENDERER_TARGETTEXTURE |
                                         (vsync ? SDL_RENDERER_PRESENTVSYNC : 0));
     if (!app->renderer) {
         LOG_WARN("Accelerated renderer failed, trying software: %s", SDL_GetError());
-        app->renderer = SDL_CreateRenderer(app->window, -1, SDL_RENDERER_SOFTWARE);
+        app->renderer = SDL_CreateRenderer(app->window, -1, SDL_RENDERER_SOFTWARE | SDL_RENDERER_TARGETTEXTURE);
         if (!app->renderer) {
             LOG_ERROR("SDL_CreateRenderer failed: %s", SDL_GetError());
             return -1;
@@ -123,37 +129,104 @@ static int init_sdl(App* app)
         }
     }
 
+    /* Load background and UI textures */
+    app->zoomed_instrument_index = -1;
+    SDL_Surface* surf = IMG_Load("assets/assets/main.png");
+    if (surf) {
+        app->bg_texture = SDL_CreateTextureFromSurface(app->renderer, surf);
+        SDL_FreeSurface(surf);
+    }
+    surf = IMG_Load("assets/assets/full_screen.png");
+    if (surf) {
+        app->btn_full_screen = SDL_CreateTextureFromSurface(app->renderer, surf);
+        SDL_FreeSurface(surf);
+    }
+    surf = IMG_Load("assets/assets/sub.png");
+    if (surf) {
+        app->btn_sub = SDL_CreateTextureFromSurface(app->renderer, surf);
+        SDL_FreeSurface(surf);
+    }
+
     LOG_INFO("SDL initialized: %dx%d window", app->screen_w, app->screen_h);
     return 0;
 }
 
 /**
- * @brief Layout instruments in equal-height rows (50/50 split).
+ * @brief Layout instruments to match the cockpit background image (main.png).
  */
 static void layout_instruments(App* app)
 {
     int count = app->instrument_count;
     if (count == 0) return;
 
-    int cols, rows;
-    if (count <= 2) { cols = count; rows = 1; }
-    else if (count <= 4) { cols = 2; rows = (count + 1) / 2; }
-    else { cols = 3; rows = 2; }
+    /* Base coordinates of the 8 screens in the 8026x3136 background image */
+    /* [0] CAPT PFD, [1] EICAS1, [2] FO PFD, [3] CAPT ND, [4] LEFT FMC, [5] EICAS2, [6] FO ND, [7] RIGHT FMC */
+    SDL_Rect orig_rects[8];
+    /* CAPT PFD */
+    orig_rects[0] = (SDL_Rect){1255, 906, 828, 778};
+    /* EICAS 1 (Upper) */
+    orig_rects[1] = (SDL_Rect){3570, 915, 830, 779};
+    /* FO PFD */
+    orig_rects[2] = (SDL_Rect){5664, 906, 829, 778};
+    /* CAPT ND */
+    orig_rects[3] = (SDL_Rect){2165, 906, 830, 778};
+    /* LEFT FMC */
+    orig_rects[4] = (SDL_Rect){2766, 1806, 643, 992};
+    /* EICAS 2 (Lower) */
+    orig_rects[5] = (SDL_Rect){3545, 1841, 830, 779};
+    /* FO ND */
+    orig_rects[6] = (SDL_Rect){4745, 906, 830, 778};
+    /* RIGHT FMC */
+    orig_rects[7] = (SDL_Rect){4617, 1806, 643, 992};
 
-    int cell_w = app->screen_w / cols;
-    int cell_h = app->screen_h / rows;
+    /* Background image dimensions */
+    float bg_w = 8026.0f;
+    float bg_h = 3136.0f;
 
-    for (int i = 0; i < count; i++) {
-        int r = i / cols;
-        int c = i % cols;
-        app->instruments[i]->rect.x = c * cell_w;
-        app->instruments[i]->rect.y = r * cell_h;
-        app->instruments[i]->rect.w = cell_w;
-        app->instruments[i]->rect.h = cell_h;
+    /* Calculate the scale and offset to fit the background image in the window while maintaining aspect ratio */
+    float scale_x = (float)app->screen_w / bg_w;
+    float scale_y = (float)app->screen_h / bg_h;
+    float scale = (scale_x < scale_y) ? scale_x : scale_y;
+
+    int render_w = (int)(bg_w * scale);
+    int render_h = (int)(bg_h * scale);
+    int offset_x = (app->screen_w - render_w) / 2;
+    int offset_y = (app->screen_h - render_h) / 2;
+
+    for (int i = 0; i < count && i < 8; i++) {
+        app->instrument_base_rects[i].x = offset_x + (int)(orig_rects[i].x * scale);
+        app->instrument_base_rects[i].y = offset_y + (int)(orig_rects[i].y * scale);
+        app->instrument_base_rects[i].w = (int)(orig_rects[i].w * scale);
+        app->instrument_base_rects[i].h = (int)(orig_rects[i].h * scale);
+
+        /* Set internal rect strictly to 772x721 for most instruments. 
+         * For FMC, we use its native proportions (643x992).
+         * We will use SDL_RenderSetScale to dynamically fit it into the base rects. */
+        int native_w = 772;
+        int native_h = 721;
+        if (app->instruments[i]->name && strstr(app->instruments[i]->name, "FMC")) {
+            native_w = 643;
+            native_h = 992;
+        }
+
+        app->instruments[i]->rect.w = native_w;
+        app->instruments[i]->rect.h = native_h;
+        app->instruments[i]->rect.x = 0;
+        app->instruments[i]->rect.y = 0;
+        
+        if (!app->instrument_targets[i]) {
+            app->instrument_targets[i] = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, native_w, native_h);
+            if (app->instrument_targets[i]) {
+                SDL_SetTextureBlendMode(app->instrument_targets[i], SDL_BLENDMODE_BLEND);
+            } else {
+                LOG_ERROR("Failed to create target texture for instrument %d", i);
+            }
+        }
+
         app->instruments[i]->needs_redraw = 1;
     }
 
-    LOG_INFO("Instruments: %dx%d grid, cell %dx%d", cols, rows, cell_w, cell_h);
+    LOG_INFO("Instruments layout calculated for %dx%d window", app->screen_w, app->screen_h);
 }
 
 /**
@@ -200,10 +273,22 @@ static int create_instruments(App* app)
         }
     }
 
-    /* Row 1 — FMC/CDU (center, shared) */
+    /* Row 1 — FMC/CDU (center left) */
     if (config_get_bool(app->config, "instruments", "fmc_enabled", 1)) {
         app->instruments[idx] = fmc_create();
-        if (app->instruments[idx]) { idx++; }
+        if (app->instruments[idx]) { 
+            app->instruments[idx]->name = "LEFT FMC";
+            idx++; 
+        }
+    }
+
+    /* Row 1 — EICAS2 (center bottom, shared) */
+    if (config_get_bool(app->config, "instruments", "eicas2_enabled", 1)) {
+        app->instruments[idx] = eicas2_create();
+        if (app->instruments[idx]) { 
+            app->instruments[idx]->name = "EICAS2";
+            idx++; 
+        }
     }
 
     /* Row 1 — First Officer ND (right seat) */
@@ -211,6 +296,15 @@ static int create_instruments(App* app)
         app->instruments[idx] = nd_create();
         if (app->instruments[idx]) {
             app->instruments[idx]->name = "FO ND";
+            idx++;
+        }
+    }
+
+    /* Row 1 — Right FMC/CDU (center right) */
+    if (config_get_bool(app->config, "instruments", "fmc_enabled", 1)) {
+        app->instruments[idx] = fmc_create();
+        if (app->instruments[idx]) {
+            app->instruments[idx]->name = "RIGHT FMC";
             idx++;
         }
     }
@@ -297,6 +391,10 @@ static void destroy_instruments(App* app)
             }
             free(app->instruments[i]);
             app->instruments[i] = NULL;
+        }
+        if (app->instrument_targets[i]) {
+            SDL_DestroyTexture(app->instrument_targets[i]);
+            app->instrument_targets[i] = NULL;
         }
     }
     app->instrument_count = 0;
@@ -538,6 +636,15 @@ static void main_loop(App* app)
         /* 2. Pump events */
         eventsys_pump(app->events);
 
+        /* Check for window resize to relayout instruments */
+        int w, h;
+        SDL_GetWindowSize(app->window, &w, &h);
+        if (w != app->screen_w || h != app->screen_h) {
+            app->screen_w = w;
+            app->screen_h = h;
+            layout_instruments(app);
+        }
+
         /* 3. Read shared flight data (lock briefly) */
         FlightDataValues snapshot;
         flight_data_snapshot(app->flight_data, &snapshot);
@@ -566,23 +673,122 @@ static void main_loop(App* app)
         standalone_eicas2_update(app->flight_data, app->delta_time);
 
         /* 5. Render */
-        SDL_SetRenderDrawColor(app->renderer, 10, 10, 15, 255);
+        SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 255);
         SDL_RenderClear(app->renderer);
 
-        static int first_frame2 = 1;
+        /* Draw background image */
+        if (app->bg_texture) {
+            float bg_w = 8026.0f;
+            float bg_h = 3136.0f;
+            float scale_x = (float)app->screen_w / bg_w;
+            float scale_y = (float)app->screen_h / bg_h;
+            float scale = (scale_x < scale_y) ? scale_x : scale_y;
+            int render_w = (int)(bg_w * scale);
+            int render_h = (int)(bg_h * scale);
+            int offset_x = (app->screen_w - render_w) / 2;
+            int offset_y = (app->screen_h - render_h) / 2;
+            SDL_Rect bg_rect = {offset_x, offset_y, render_w, render_h};
+            SDL_RenderCopy(app->renderer, app->bg_texture, NULL, &bg_rect);
+        }
+
+        /* Draw instruments that are NOT zoomed first */
         for (int i = 0; i < app->instrument_count; i++) {
+            if (i == app->zoomed_instrument_index) continue;
             Instrument* inst = app->instruments[i];
-            if (inst && inst->on_render) {
-                if (first_frame2) fprintf(stderr, "[RENDER] Drawing %s...\n", inst->name);
-                /* Clip to instrument rect */
-                SDL_RenderSetClipRect(app->renderer, &inst->rect);
+            if (inst && inst->on_render && app->instrument_targets[i]) {
+                SDL_Rect phys = app->instrument_base_rects[i];
+
+                /* Render instrument to its target texture at native 772x721 */
+                SDL_SetRenderTarget(app->renderer, app->instrument_targets[i]);
+                SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 255);
+                SDL_RenderClear(app->renderer);
                 inst->on_render(inst, app->renderer);
                 inst->needs_redraw = 0;
-                if (first_frame2) fprintf(stderr, "[RENDER] %s done\n", inst->name);
+
+                /* Restore default render target and copy scaled texture */
+                SDL_SetRenderTarget(app->renderer, NULL);
+                SDL_RenderCopy(app->renderer, app->instrument_targets[i], NULL, &phys);
             }
         }
-        first_frame2 = 0;
+
+        /* Draw zoomed instrument on top */
+        if (app->zoomed_instrument_index >= 0 && app->zoomed_instrument_index < app->instrument_count) {
+            Instrument* inst = app->instruments[app->zoomed_instrument_index];
+            if (inst && inst->on_render && app->instrument_targets[app->zoomed_instrument_index]) {
+                /* Draw a dark overlay to dim the background */
+                SDL_RenderSetClipRect(app->renderer, NULL);
+                SDL_SetRenderDrawBlendMode(app->renderer, SDL_BLENDMODE_BLEND);
+                SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 150);
+                SDL_Rect full_rect = {0, 0, app->screen_w, app->screen_h};
+                SDL_RenderFillRect(app->renderer, &full_rect);
+
+                int native_w = 772;
+                int native_h = 721;
+                if (inst->name && strstr(inst->name, "FMC")) {
+                    native_w = 643;
+                    native_h = 992;
+                }
+
+                SDL_Rect phys;
+                phys.w = native_w;
+                phys.h = native_h;
+                phys.x = (app->screen_w - native_w) / 2;
+                phys.y = (app->screen_h - native_h) / 2;
+
+                /* Render instrument to its target texture at native resolution */
+                SDL_SetRenderTarget(app->renderer, app->instrument_targets[app->zoomed_instrument_index]);
+                SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 255);
+                SDL_RenderClear(app->renderer);
+                inst->on_render(inst, app->renderer);
+                inst->needs_redraw = 0;
+
+                /* Restore default render target and copy texture */
+                SDL_SetRenderTarget(app->renderer, NULL);
+                SDL_RenderCopy(app->renderer, app->instrument_targets[app->zoomed_instrument_index], NULL, &phys);
+            }
+        }
+
         SDL_RenderSetClipRect(app->renderer, NULL);
+
+        /* Draw zoom buttons on each instrument */
+        for (int i = 0; i < app->instrument_count; i++) {
+            if (app->zoomed_instrument_index >= 0 && app->zoomed_instrument_index != i) {
+                continue; /* If zoomed in, only draw the button for the zoomed instrument */
+            }
+
+            Instrument* inst = app->instruments[i];
+            if (!inst) continue;
+
+            SDL_Rect phys;
+            if (app->zoomed_instrument_index == i) {
+                int native_w = 772;
+                int native_h = 721;
+                if (inst->name && strstr(inst->name, "FMC")) {
+                    native_w = 643;
+                    native_h = 992;
+                }
+                phys.w = native_w;
+                phys.h = native_h;
+                phys.x = (app->screen_w - native_w) / 2;
+                phys.y = (app->screen_h - native_h) / 2;
+            } else {
+                phys = app->instrument_base_rects[i];
+            }
+
+            SDL_Texture* btn_tex = (app->zoomed_instrument_index == i) ? app->btn_sub : app->btn_full_screen;
+            if (btn_tex) {
+                int btn_size = (app->zoomed_instrument_index == i) ? 32 : (phys.w * 32 / 772);
+                if (btn_size < 16) btn_size = 16;
+                SDL_Rect btn_rect = {
+                    phys.x + phys.w - btn_size - 4,
+                    phys.y + 4,
+                    btn_size,
+                    btn_size
+                };
+                SDL_RenderCopy(app->renderer, btn_tex, NULL, &btn_rect);
+            }
+        }
+
         SDL_RenderPresent(app->renderer);
         
         standalone_fmc_render();
@@ -644,11 +850,118 @@ static int instrument_event_bridge(const SDL_Event* event, void* userdata)
     }
 
     App* app = (App*)userdata;
-    for (int i = 0; i < app->instrument_count; i++) {
-        Instrument* inst = app->instruments[i];
+
+    if (event->type == SDL_MOUSEBUTTONDOWN) {
+        int mx = event->button.x;
+        int my = event->button.y;
+        /* Check zoom buttons first */
+        for (int i = 0; i < app->instrument_count; i++) {
+            Instrument* inst = app->instruments[i];
+            if (!inst) continue;
+
+            SDL_Rect phys;
+            if (app->zoomed_instrument_index == i) {
+                int native_w = 772;
+                int native_h = 721;
+                if (inst->name && strstr(inst->name, "FMC")) {
+                    native_w = 643;
+                    native_h = 992;
+                }
+                phys.w = native_w;
+                phys.h = native_h;
+                phys.x = (app->screen_w - native_w) / 2;
+                phys.y = (app->screen_h - native_h) / 2;
+            } else {
+                phys = app->instrument_base_rects[i];
+            }
+
+            int btn_size = (app->zoomed_instrument_index == i) ? 32 : (phys.w * 32 / 772);
+            if (btn_size < 16) btn_size = 16;
+            
+            SDL_Rect btn_rect = {
+                phys.x + phys.w - btn_size - 4,
+                phys.y + 4,
+                btn_size,
+                btn_size
+            };
+
+            if (mx >= btn_rect.x && mx <= btn_rect.x + btn_rect.w &&
+                my >= btn_rect.y && my <= btn_rect.y + btn_rect.h) {
+                if (app->zoomed_instrument_index == i) {
+                    app->zoomed_instrument_index = -1; /* zoom out */
+                } else {
+                    app->zoomed_instrument_index = i; /* zoom in */
+                }
+                layout_instruments(app); /* reapply layout */
+                return 1; /* consumed */
+            }
+        }
+    }
+
+    /* Route to zoomed instrument first */
+    if (app->zoomed_instrument_index >= 0 && app->zoomed_instrument_index < app->instrument_count) {
+        Instrument* inst = app->instruments[app->zoomed_instrument_index];
         if (inst && inst->on_event) {
-            if (inst->on_event(inst, event)) {
-                return 1;  /* Consumed by this instrument */
+            SDL_Event local_event = *event;
+            if (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_MOUSEBUTTONUP || event->type == SDL_MOUSEMOTION) {
+                int native_w = 772;
+                int native_h = 721;
+                if (inst->name && strstr(inst->name, "FMC")) {
+                    native_w = 643;
+                    native_h = 992;
+                }
+
+                SDL_Rect phys;
+                phys.w = native_w;
+                phys.h = native_h;
+                phys.x = (app->screen_w - native_w) / 2;
+                phys.y = (app->screen_h - native_h) / 2;
+                
+                float scale_x = (float)native_w / (float)phys.w;
+                float scale_y = (float)native_h / (float)phys.h;
+                
+                if (event->type == SDL_MOUSEMOTION) {
+                    local_event.motion.x = (Sint32)((event->motion.x - phys.x) * scale_x);
+                    local_event.motion.y = (Sint32)((event->motion.y - phys.y) * scale_y);
+                } else {
+                    local_event.button.x = (Sint32)((event->button.x - phys.x) * scale_x);
+                    local_event.button.y = (Sint32)((event->button.y - phys.y) * scale_y);
+                }
+            }
+            if (inst->on_event(inst, &local_event)) {
+                return 1;
+            }
+        }
+    } else {
+        /* Route to all instruments */
+        for (int i = 0; i < app->instrument_count; i++) {
+            Instrument* inst = app->instruments[i];
+            if (inst && inst->on_event) {
+                SDL_Event local_event = *event;
+                if (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_MOUSEBUTTONUP || event->type == SDL_MOUSEMOTION) {
+                    SDL_Rect phys = app->instrument_base_rects[i];
+                    
+                    int native_w = 772;
+                    int native_h = 721;
+                    if (inst->name && strstr(inst->name, "FMC")) {
+                        native_w = 643;
+                        native_h = 992;
+                    }
+                    
+                    float scale_x = (float)native_w / (float)phys.w;
+                    float scale_y = (float)native_h / (float)phys.h;
+                    
+                    if (event->type == SDL_MOUSEMOTION) {
+                        local_event.motion.x = (Sint32)((event->motion.x - phys.x) * scale_x);
+                        local_event.motion.y = (Sint32)((event->motion.y - phys.y) * scale_y);
+                    } else {
+                        local_event.button.x = (Sint32)((event->button.x - phys.x) * scale_x);
+                        local_event.button.y = (Sint32)((event->button.y - phys.y) * scale_y);
+                    }
+                }
+                if (inst->on_event(inst, &local_event)) {
+                    return 1;  /* Consumed by this instrument */
+                }
             }
         }
     }

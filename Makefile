@@ -8,8 +8,11 @@ CC       := gcc
 BIN      := cockpit.exe
 
 # pkg-config for SDL2 libraries (fails gracefully if not installed)
-SDL_CFLAGS := $(shell pkg-config --cflags sdl2 SDL2_image SDL2_ttf 2>/dev/null || echo "")
-SDL_LIBS   := $(shell pkg-config --libs   sdl2 SDL2_image SDL2_ttf 2>/dev/null || echo "-lSDL2 -lSDL2_image -lSDL2_ttf")
+SDL_CFLAGS := $(shell pkg-config --cflags sdl2 SDL2_image SDL2_ttf 2>/dev/null)
+SDL_LIBS   := $(shell pkg-config --libs   sdl2 SDL2_image SDL2_ttf 2>/dev/null)
+ifeq ($(SDL_LIBS),)
+  SDL_LIBS := -lmingw32 -lSDL2main -lSDL2 -lSDL2_image -lSDL2_ttf
+endif
 
 # Common flags
 WARN_FLAGS   := -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wstrict-prototypes -Wmissing-prototypes
@@ -19,8 +22,11 @@ INC_FLAGS    := -Isrc $(SDL_CFLAGS)
 LDFLAGS      := -lws2_32 -lm $(SDL_LIBS)
 
 # If SDL2_gfx is available, include it
-SDL_GFX_CFLAGS := $(shell pkg-config --cflags SDL2_gfx 2>/dev/null || echo "")
-SDL_GFX_LIBS   := $(shell pkg-config --libs   SDL2_gfx 2>/dev/null || echo "-lSDL2_gfx")
+SDL_GFX_CFLAGS := $(shell pkg-config --cflags SDL2_gfx 2>/dev/null)  
+SDL_GFX_LIBS   := $(shell pkg-config --libs   SDL2_gfx 2>/dev/null)
+ifeq ($(SDL_GFX_LIBS),)
+  SDL_GFX_LIBS := -lSDL2_gfx
+endif
 ifneq ($(SDL_GFX_CFLAGS),)
   INC_FLAGS += $(SDL_GFX_CFLAGS)
   LDFLAGS   += $(SDL_GFX_LIBS)

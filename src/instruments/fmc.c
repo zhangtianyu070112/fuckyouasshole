@@ -27,6 +27,7 @@
 #include "utils/font_manager.h"
 #include "utils/logger.h"
 
+#include <SDL2/SDL_image.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -121,6 +122,17 @@ typedef struct {
     /* Clickable CDU keypad */
     int      kb_y;                 /* Top of keyboard area */
     int      kb_h;                 /* Keyboard area height */
+    
+    /* Background and layout */
+    SDL_Texture* bg_texture;
+    struct {
+        float x1, y1, x2, y2;
+    } screen_bbox;
+    struct {
+        char label[32];
+        float x1, y1, x2, y2;
+    } buttons[100];
+    int button_count;
 } FMCData;
 
 /* =========================================================================
@@ -146,6 +158,45 @@ static void set_col(SDL_Renderer* r, uint8_t R, uint8_t G, uint8_t B, uint8_t A)
 /* =========================================================================
  *  Message system
  * ========================================================================= */
+
+static void parse_json_layout(FMCData* d) {
+    FILE* f = fopen("location-FMC.json", "r");
+    if (!f) return;
+    char line[512];
+    int in_screen = 0;
+    while (fgets(line, sizeof(line), f)) {
+        char* label_ptr = strstr(line, "\"label\"");
+        char* bbox_ptr = strstr(line, "\"bbox\"");
+        
+        if (label_ptr && strstr(label_ptr, "DISPLAY_SCREEN")) {
+            in_screen = 1;
+        } else if (in_screen && bbox_ptr) {
+            sscanf(bbox_ptr, "\"bbox\": [%f, %f, %f, %f]", &d->screen_bbox.x1, &d->screen_bbox.y1, &d->screen_bbox.x2, &d->screen_bbox.y2);
+            in_screen = 0;
+        } else if (label_ptr && bbox_ptr) {
+            char label[32] = {0};
+            float x1, y1, x2, y2;
+            char* val = strchr(label_ptr + 7, '"');
+            if (val) {
+                val++;
+                char* end = strchr(val, '"');
+                if (end) {
+                    int len = end - val;
+                    if (len > 31) len = 31;
+                    strncpy(label, val, len);
+                }
+            }
+            sscanf(bbox_ptr, "\"bbox\": [%f, %f, %f, %f]", &x1, &y1, &x2, &y2);
+            strcpy(d->buttons[d->button_count].label, label);
+            d->buttons[d->button_count].x1 = x1;
+            d->buttons[d->button_count].y1 = y1;
+            d->buttons[d->button_count].x2 = x2;
+            d->buttons[d->button_count].y2 = y2;
+            d->button_count++;
+        }
+    }
+    fclose(f);
+}
 
 static void set_message(FMCData* d, const char* msg)
 {
@@ -1257,159 +1308,9 @@ static void draw_fmc_screen(SDL_Renderer* r, const SDL_Rect* rect, FMCData* d)
         }
     }
 
-    /* CDU Keypad — B737-style layout (3 func rows + 6 alpha rows)
-     * Keyboard spans full panel width, not limited to screen. */
-    {
-        int kb_y = screen_top + screen_h + KB_GAP;
-        int kb_h = rect->y + rect->h - kb_y - KB_BOTTOM_GAP;
-        if (kb_h < 80) kb_h = 80;
-        int kb_x = rect->x + SCREEN_MARGIN;
-        int kb_w = rect->w - 2 * SCREEN_MARGIN;
-
-        d->kb_y = kb_y;
-        d->kb_h = kb_h;
-
-        /* Keypad background */
-        set_col(r, COL_TAPE_BG);
-        SDL_Rect kb_bg = { kb_x, kb_y, kb_w, kb_h };
-        SDL_RenderFillRect(r, &kb_bg);
-        set_col(r, COL_DARK_GRAY);
-        SDL_RenderDrawRect(r, &kb_bg);
-
-        int pad = 3, margin = 4;
-        int exec_rows = 1, func_rows = 3, alpha_rows = 6;
-        int total_rows = exec_rows + func_rows + alpha_rows;
-        int key_h = (kb_h - margin * 2 - pad * (total_rows - 1)) / total_rows;
-        if (key_h < 16) key_h = 16;
-
-        /* ---- Helper: draw a single key button ---- */
-#define DRAW_KEY(bx, by, bw, bh, text, text_color) do {            \
-    SDL_Rect br_ = { (bx), (by), (bw), (bh) };                     \
-    set_col(r, COL_DARK_GRAY);                                     \
-    SDL_RenderFillRect(r, &br_);                                   \
-    set_col(r, COL_GRAY);                                          \
-    SDL_RenderDrawRect(r, &br_);                                   \
-    set_col(r, text_color);                                        \
-    int tx_ = (bx) + (bw) / 2;                                     \
-    int ty_ = (by) + (bh) / 2;                                     \
-    float sc_ = ((bh) < 26) ? 0.40f : ((bh) < 32) ? 0.48f : 0.55f; \
-    draw_text_simple(r, tx_, ty_, (text), sc_);                    \
-} while (0)
-
-        /* === EXEC row (right-aligned, between screen and func keys) === */
-        {
-            int exec_w = kb_w * 3 / 10;  /* ~30% of keyboard width */
-            if (exec_w < 60) exec_w = 60;
-            int exec_x = kb_x + kb_w - margin - exec_w;
-            int exec_y = kb_y + margin;
-            int exec_h = key_h;
-
-            SDL_Rect exec_br = { exec_x, exec_y, exec_w, exec_h };
-            set_col(r, 0x40, 0x40, 0x48, 255);
-            SDL_RenderFillRect(r, &exec_br);
-            set_col(r, COL_WHITE);
-            SDL_RenderDrawRect(r, &exec_br);
-            SDL_Rect exec_in = { exec_x + 2, exec_y + 2, exec_w - 4, exec_h - 4 };
-            set_col(r, COL_GREEN);
-            SDL_RenderDrawRect(r, &exec_in);
-            set_col(r, COL_GREEN);
-            draw_text_simple(r, exec_x + exec_w / 2, exec_y + exec_h / 2,
-                             "EXEC", 0.7f);
-        }
-
-        /* === Function key rows (3 rows × 5 cols) === */
-        {
-            int func_y = kb_y + margin + exec_rows * (key_h + pad);
-            int fk_w = (kb_w - margin * 2 - pad * 4) / 5;
-            if (fk_w < 28) fk_w = 28;
-
-            const char* fkeys[3][5] = {
-                { "INIT REF", "RTE",  "CLB", "CRZ", "DES"      },
-                { "DIR INTC", "LEGS", "DEP ARR", "HOLD", "PROG"},
-                { "FIX", "NAV RAD", "PREV PAGE", "NEXT PAGE", "PERF" }
-            };
-
-            for (int row = 0; row < func_rows; row++) {
-                int by = func_y + row * (key_h + pad);
-                for (int c = 0; c < 5; c++) {
-                    int bx = kb_x + margin + c * (fk_w + pad);
-                    DRAW_KEY(bx, by, fk_w, key_h, fkeys[row][c], COL_WHITE);
-                }
-            }
-        }
-
-        /* === Alphanumeric section (6 rows) === */
-        {
-            int alpha_y = kb_y + margin + (exec_rows + func_rows) * (key_h + pad);
-            int num_cols = 3, let_cols = 5, edit_cols = 1;
-            int total_cols = num_cols + let_cols + edit_cols;
-            int col_w = (kb_w - margin * 2 - pad * (total_cols + 1)) / total_cols;
-            if (col_w < 18) col_w = 18;
-
-            /* Number keys (left, 3 cols × 4 rows) */
-            const char* nums[12] = {"1","2","3","4","5","6","7","8","9",".","0","+/-"};
-            /* Letter keys (center, 5 cols × 6 rows, 26 letters used) */
-            const char* lets[30] = {
-                "A","B","C","D","E",  "F","G","H","I","J",
-                "K","L","M","N","O",  "P","Q","R","S","T",
-                "U","V","W","X","Y",  "Z","","","",""
-            };
-            /* Edit keys (right, 1 col × 4 rows) */
-            const char* edits[4] = {"CLR","DEL","SP","/"};
-
-            for (int row = 0; row < alpha_rows; row++) {
-                int by = alpha_y + row * (key_h + pad);
-
-                /* Numbers (left group, rows 0-3 only) */
-                if (row < 4) {
-                    for (int c = 0; c < num_cols; c++) {
-                        int idx = row * num_cols + c;
-                        int bx = kb_x + margin + c * (col_w + pad);
-                        SDL_Rect br = { bx, by, col_w, key_h };
-                        set_col(r, 0x28, 0x28, 0x30, 255);
-                        SDL_RenderFillRect(r, &br);
-                        set_col(r, COL_GRAY);
-                        SDL_RenderDrawRect(r, &br);
-                        set_col(r, COL_WHITE);
-                        draw_text_simple(r, bx + col_w / 2, by + key_h / 2,
-                                         nums[idx], 0.55f);
-                    }
-                }
-
-                /* Letters (center group, all 6 rows) */
-                {
-                    int lx = kb_x + margin + num_cols * (col_w + pad) + pad;
-                    for (int c = 0; c < let_cols; c++) {
-                        int idx = row * let_cols + c;
-                        if (idx >= 30) continue;
-                        const char* label = lets[idx];
-                        if (!label[0]) continue;
-                        int bx = lx + c * (col_w + pad);
-                        DRAW_KEY(bx, by, col_w, key_h, label, COL_WHITE);
-                    }
-                }
-
-                /* Edit keys (right group, rows 0-3 only) */
-                if (row < 4) {
-                    int ex = kb_x + margin + (num_cols + let_cols) * (col_w + pad) + pad;
-                    SDL_Rect br = { ex, by, col_w, key_h };
-                    set_col(r, 0x30, 0x28, 0x20, 255);
-                    SDL_RenderFillRect(r, &br);
-                    set_col(r, COL_AMBER);
-                    SDL_RenderDrawRect(r, &br);
-                    set_col(r, COL_AMBER);
-                    draw_text_simple(r, ex + col_w / 2, by + key_h / 2,
-                                     edits[row], 0.55f);
-                }
-            }
-        }
-
-#undef DRAW_KEY
-    }
-
     /* Border */
-    set_col(r, COL_GRAY);
-    SDL_RenderDrawRect(r, rect);
+    // set_col(r, COL_GRAY);
+    // SDL_RenderDrawRect(r, rect);
 }
 
 /* =========================================================================
@@ -1444,6 +1345,16 @@ static void fmc_on_init(Instrument* self, App* app)
     /* Create AVL tree for sorted waypoint display */
     d->wpt_tree = avl_create(wpt_compare_ident, NULL);
 
+    /* Load background image and parse layout */
+    SDL_Surface* surf = IMG_Load("assets/assets/fmc.png");
+    if (surf) {
+        d->bg_texture = SDL_CreateTextureFromSurface(app->renderer, surf);
+        SDL_FreeSurface(surf);
+    } else {
+        LOG_WARN("Failed to load assets/assets/fmc.png in fmc.c");
+    }
+    parse_json_layout(d);
+
     build_page(d);
     LOG_INFO("FMC initialized (graph: %s, avl: %s, msgs: %s)",
              d->graph ? "OK" : "NONE",
@@ -1471,12 +1382,73 @@ static void fmc_on_render(Instrument* self, SDL_Renderer* renderer)
     FMCData* d = (FMCData*)self->private_data;
     const SDL_Rect* rect = &self->rect;
 
-    /* Background */
-    set_col(renderer, COL_BG);
-    SDL_RenderFillRect(renderer, rect);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderClear(renderer);
 
-    /* Draw CDU screen */
-    draw_fmc_screen(renderer, rect, d);
+    if (d->bg_texture) {
+        SDL_RenderCopy(renderer, d->bg_texture, NULL, rect);
+    }
+
+    int sx = (int)(d->screen_bbox.x1 * rect->w);
+    int sy = (int)(d->screen_bbox.y1 * rect->h);
+    int sw = (int)((d->screen_bbox.x2 - d->screen_bbox.x1) * rect->w);
+    int sh = (int)((d->screen_bbox.y2 - d->screen_bbox.y1) * rect->h);
+
+    int line_h = sh / 14; // Slightly more lines to fit text nicely
+    int screen_top = sy + 4;
+    int screen_left = sx + 4;
+
+    // Title bar
+    set_col(renderer, COL_WHITE);
+    const char* page_names[] = { "IDENT", "RTE", "LEGS", "PERF", "PROG", "RADIO" };
+    char page_title[32];
+    snprintf(page_title, sizeof(page_title), "%d/6 %s", d->current_page + 1, page_names[d->current_page]);
+    draw_text_simple(renderer, sx + sw - 40, screen_top + line_h/2, page_title, 0.6f);
+    draw_text_simple(renderer, sx + sw/2, screen_top + line_h/2, "FMC-CDU", 0.7f);
+
+    /* Display lines */
+    for (int ln = 0; ln < 12; ln++) {
+        int y = screen_top + (ln + 1) * line_h + line_h / 2;
+
+        /* Display text (monospaced, left-aligned for column alignment) */
+        set_col(renderer, COL_WHITE);
+        font_draw_scaled_aligned(renderer, screen_left, y, d->display[ln],
+                                 0.55f, FONT_MONO, FONT_ALIGN_LEFT);
+    }
+
+    /* Scratchpad content */
+    int scratch_line_y = screen_top + 13 * line_h;
+    {
+        char sp_display[32];
+        int blink = ((SDL_GetTicks() / 500) % 2);  /* 500ms blink */
+        snprintf(sp_display, sizeof(sp_display), "%s%c",
+                 d->scratchpad, blink ? '_' : ' ');
+        set_col(renderer, COL_CYAN);
+        font_draw_scaled_aligned(renderer, screen_left, scratch_line_y,
+                                 sp_display, 0.65f, FONT_MONO, FONT_ALIGN_LEFT);
+    }
+
+    /* Status message area (from linked list history) */
+    {
+        int msg_y = scratch_line_y - line_h;
+        int total_msgs = d->message_history ? ll_size(d->message_history) : 0;
+
+        if (total_msgs > 0) {
+            /* message_scroll: 0 = latest, N = Nth older */
+            int idx = total_msgs - 1 - d->message_scroll;
+            if (idx < 0) idx = 0;
+
+            FmcMessage* m = (FmcMessage*)ll_get(d->message_history, idx);
+            if (m) {
+                int show = (d->message_scroll > 0) ||
+                           ((SDL_GetTicks() - m->timestamp) < MSG_TIMEOUT_MS);
+                if (show) {
+                    set_col(renderer, COL_AMBER);
+                    draw_text_simple(renderer, sx + sw / 2, msg_y, m->text, 0.6f);
+                }
+            }
+        }
+    }
 }
 
 static int fmc_on_event(Instrument* self, const SDL_Event* ev)
@@ -1490,13 +1462,23 @@ static int fmc_on_event(Instrument* self, const SDL_Event* ev)
 
         /* Check if within this instrument's rect */
         if (mx >= 0 && my >= 0 && mx < self->rect.w && my < self->rect.h) {
-            /* Try LSK click first */
-            if (check_lsk_click(d, &self->rect, mx, my)) {
-                return 1;
-            }
-            /* Try CDU keypad button */
-            if (check_cdu_click(d, &self->rect, mx, my)) {
-                return 1;
+            for (int i = 0; i < d->button_count; i++) {
+                int bx = (int)(d->buttons[i].x1 * self->rect.w);
+                int by = (int)(d->buttons[i].y1 * self->rect.h);
+                int bw = (int)((d->buttons[i].x2 - d->buttons[i].x1) * self->rect.w);
+                int bh = (int)((d->buttons[i].y2 - d->buttons[i].y1) * self->rect.h);
+
+                if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
+                    const char* label = d->buttons[i].label;
+                    if (strncmp(label, "LSK_", 4) == 0) {
+                        int num = label[4] - '1';
+                        if (label[5] == 'L') handle_lsk(d, 0, num);
+                        else if (label[5] == 'R') handle_lsk(d, 1, num);
+                    } else {
+                        cdu_button_action(d, label);
+                    }
+                    return 1;
+                }
             }
         }
     }
@@ -1627,6 +1609,10 @@ static void fmc_on_destroy(Instrument* self)
         if (d->message_history) {
             ll_destroy(d->message_history, 1);  /* free FmcMessage nodes */
             d->message_history = NULL;
+        }
+        if (d->bg_texture) {
+            SDL_DestroyTexture(d->bg_texture);
+            d->bg_texture = NULL;
         }
         free(self->private_data);
         self->private_data = NULL;

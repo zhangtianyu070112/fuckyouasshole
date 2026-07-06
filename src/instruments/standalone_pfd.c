@@ -20,7 +20,7 @@ int standalone_pfd_init(App* app) {
     g_spfd = calloc(1, sizeof(StandalonePFD));
     if (!g_spfd) return -1;
 
-    g_spfd->window = SDL_CreateWindow("Standalone PFD", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 772, 721, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+    g_spfd->window = SDL_CreateWindow("Standalone PFD", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 772, 721, SDL_WINDOW_SHOWN);
     if (!g_spfd->window) { free(g_spfd); return -1; }
 
     g_spfd->renderer = SDL_CreateRenderer(g_spfd->window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);

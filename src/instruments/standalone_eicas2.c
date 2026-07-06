@@ -20,7 +20,7 @@ int standalone_eicas2_init(App* app) {
     g_se2 = calloc(1, sizeof(StandaloneEICAS2));
     if (!g_se2) return -1;
 
-    g_se2->window = SDL_CreateWindow("Standalone EICAS 2", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 772, 721, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+    g_se2->window = SDL_CreateWindow("Standalone EICAS 2", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 772, 721, SDL_WINDOW_SHOWN);
     if (!g_se2->window) { free(g_se2); return -1; }
 
     g_se2->renderer = SDL_CreateRenderer(g_se2->window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);

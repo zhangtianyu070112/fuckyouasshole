@@ -20,7 +20,7 @@ int standalone_nd_init(App* app) {
     g_snd = calloc(1, sizeof(StandaloneND));
     if (!g_snd) return -1;
 
-    g_snd->window = SDL_CreateWindow("Standalone ND", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 772, 721, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+    g_snd->window = SDL_CreateWindow("Standalone ND", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 772, 721, SDL_WINDOW_SHOWN);
     if (!g_snd->window) { free(g_snd); return -1; }
 
     g_snd->renderer = SDL_CreateRenderer(g_snd->window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);

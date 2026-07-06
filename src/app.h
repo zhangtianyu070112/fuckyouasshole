@@ -55,6 +55,14 @@ typedef struct App {
     Instrument*    instruments[8];
     int            instrument_count;
 
+    int            zoomed_instrument_index; /* -1 if none is zoomed, else 0..count-1 */
+    SDL_Rect       instrument_base_rects[8]; /* The small rects on the cockpit bg */
+    SDL_Texture*   instrument_targets[8];    /* Render targets for adaptive scaling */
+
+    SDL_Texture*   bg_texture;
+    SDL_Texture*   btn_full_screen;
+    SDL_Texture*   btn_sub;
+
     /* Network / data source threads */
     Thread*        udp_thread;
     Thread*        mock_thread;
