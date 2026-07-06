@@ -30,6 +30,7 @@
 #include "net/mock_data.h"
 #include "audio/alert_system.h"
 #include "utils/font_manager.h"
+#include "cabin/cabin_server.h"
 
 #include <SDL2/SDL_ttf.h>
 
@@ -544,6 +545,11 @@ static void main_loop(App* app)
             alert_system_update(app->alert_sys, &snapshot, app->delta_time);
         }
 
+        /* 3c. Update Cabin Display Server */
+        if (app->cabin_server) {
+            cabin_server_update_position(app->cabin_server, app->flight_data);
+        }
+
         /* 4. Update all instruments */
         for (int i = 0; i < app->instrument_count; i++) {
             Instrument* inst = app->instruments[i];
@@ -752,6 +758,9 @@ int app_run_with_config(const char* config_path)
     start_data_source(app);
     fprintf(stderr, "[STARTUP] 7/7 Entering main loop\n");
 
+    /* 8c. Start Cabin Display Server */
+    app->cabin_server = cabin_server_create(app->config, app->fmc_state);
+
     /* 9. Main loop */
     app->running = 1;
     main_loop(app);
@@ -785,6 +794,12 @@ cleanup:
     if (app->mock_ctx) {
         mock_data_free(app->mock_ctx);
         app->mock_ctx = NULL;
+    }
+
+    /* Stop Cabin Display Server */
+    if (app->cabin_server) {
+        cabin_server_destroy(app->cabin_server);
+        app->cabin_server = NULL;
     }
 
     /* Destroy alert system */

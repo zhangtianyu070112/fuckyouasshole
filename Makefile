@@ -32,7 +32,7 @@ CFLAGS := $(WARN_FLAGS) $(OPT_FLAGS) $(INC_FLAGS) $(CFLAGS_GFX)
 # -----------------------------------------------------------------------------
 # Source files (auto-discovered)
 # -----------------------------------------------------------------------------
-SRC_DIRS := src src/utils src/config src/net src/instruments src/data src/ds src/map src/audio
+SRC_DIRS := src src/utils src/config src/net src/instruments src/data src/ds src/map src/audio src/cabin
 SRCS     := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.c))
 OBJS     := $(SRCS:.c=.o)
 DEPS     := $(SRCS:.c=.d)

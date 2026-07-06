@@ -151,7 +151,7 @@ typedef struct FMCState {
     /* Navigation database */
     Waypoint       nav_waypoints[512];
     int            nav_wpt_count;
-    Airport        nav_airports[128];
+    Airport        nav_airports[256];
     int            nav_apt_count;
 
     /* State */

@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cabin Moving Map</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden;
+                 background: #0a0a0f; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; }
+
+    /* --- Full-screen map container --- */
+    #map {
+        position: absolute; top: 0; left: 0; right: 0;
+        bottom: 80px; /* leave room for data bar */
+    }
+
+    /* Hide 高德 logo + copyright on cabin display (clean kiosk look) */
+    .amap-logo, .amap-copyright { display: none !important; }
+
+    /* --- Bottom data bar --- */
+    #data-bar {
+        position: absolute; bottom: 0; left: 0; right: 0; height: 80px;
+        background: linear-gradient(180deg, rgba(10,10,15,0.95) 0%, #0a0a0f 100%);
+        border-top: 1px solid #1a3a2a;
+        display: flex; align-items: center; justify-content: space-around;
+        padding: 0 20px; z-index: 100;
+    }
+    .data-item { text-align: center; }
+    .data-label { font-size: 10px; color: #5a7a5a; text-transform: uppercase;
+                  letter-spacing: 2px; margin-bottom: 2px; }
+    .data-value { font-size: 22px; color: #00FF88; font-weight: bold;
+                  font-variant-numeric: tabular-nums; }
+    .data-unit  { font-size: 11px; color: #3a6a3a; margin-left: 2px; }
+
+    /* --- Progress bar (top of data bar) --- */
+    #progress-wrap {
+        position: absolute; bottom: 80px; left: 0; right: 0; height: 3px;
+        background: rgba(255,255,255,0.05); z-index: 101;
+    }
+    #progress-fill {
+        height: 100%; width: 0%;
+        background: linear-gradient(90deg, #00FF88, #00cc66);
+        transition: width 1s ease-out;
+    }
+
+    /* --- Airport marker labels (leaflet-style) --- */
+    .airport-label {
+        color: #fff; font-size: 11px; font-weight: bold;
+        text-shadow: 0 0 6px rgba(0,0,0,0.9);
+        white-space: nowrap; pointer-events: none;
+    }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="progress-wrap"><div id="progress-fill"></div></div>
+<div id="data-bar">
+    <div class="data-item">
+        <div class="data-label">Ground Speed</div>
+        <div class="data-value" id="v-gs">---<span class="data-unit">KTS</span></div>
+    </div>
+    <div class="data-item">
+        <div class="data-label">Altitude</div>
+        <div class="data-value" id="v-alt">---<span class="data-unit">FT</span></div>
+    </div>
+    <div class="data-item">
+        <div class="data-label">Heading</div>
+        <div class="data-value" id="v-hdg">---<span class="data-unit">°</span></div>
+    </div>
+    <div class="data-item">
+        <div class="data-label">OAT</div>
+        <div class="data-value" id="v-oat">---<span class="data-unit">°C</span></div>
+    </div>
+    <div class="data-item">
+        <div class="data-label">Distance to Dest</div>
+        <div class="data-value" id="v-dist">---<span class="data-unit">NM</span></div>
+    </div>
+    <div class="data-item">
+        <div class="data-label">ETA</div>
+        <div class="data-value" id="v-eta">--:--<span class="data-unit">UTC</span></div>
+    </div>
+</div>
+
+<script>
+/* ========================================================================
+ *  Configuration — loaded from /api/config
+ * ======================================================================== */
+let AMAP_KEY = '';
+const POLL_INTERVAL_MS = 1000;
+
+/* ========================================================================
+ *  State
+ * ======================================================================== */
+let map = null;
+let aircraftMarker = null;       /* AMap.Marker */
+let routeLine = null;            /* planned route polyline */
+let flownLine = null;            /* flown path polyline */
+let departureMarker = null;
+let arrivalMarker = null;
+let waypointMarkers = [];        /* array of {marker, label} */
+let lastPosition = null;         /* {lat, lon} */
+let initialCentered = false;     /* true after first map centering */
+let lastRouteHash = '';          /* track route changes for setFitView */
+let animFrameId = null;
+
+/* Auto-zoom */
+let baseZoom = 6;
+let zoomStartTime = Date.now();
+const ZOOM_CYCLE_S = 60;
+const ZOOM_AMPLITUDE = 2.5;
+
+/* ========================================================================
+ *  Init — load config, then load 高德 JS API
+ * ======================================================================== */
+async function init() {
+    try {
+        const r = await fetch('/api/config');
+        const cfg = await r.json();
+        if (cfg.amap_js_key && cfg.amap_js_key !== 'YOUR_AMAP_KEY_HERE') {
+            AMAP_KEY = cfg.amap_js_key;
+        }
+    } catch(e) { console.warn('Failed to load config, using default key', e); }
+
+    if (!AMAP_KEY) {
+        document.body.innerHTML = '<div style="color:#ff4444;text-align:center;'
+            + 'padding:100px;font-size:18px;">'
+            + '<h2>高德地图 API Key 未配置</h2>'
+            + '<p>请在 <code>config/default.cfg</code> 的 <code>[cabin]</code> 段设置 '
+            + '<code>amap_js_key</code></p>'
+            + '<p style="font-size:13px;color:#888;">Key 申请: https://lbs.amap.com/ → Web端(JS API)</p>'
+            + '</div>';
+        return;
+    }
+
+    /* Load 高德 JS API 2.0 dynamically */
+    const script = document.createElement('script');
+    script.src = `https://webapi.amap.com/maps?v=2.0&key=${AMAP_KEY}`;
+    script.onload = onMapSDKReady;
+    script.onerror = () => {
+        document.body.innerHTML = '<div style="color:#ff4444;text-align:center;'
+            + 'padding:100px;font-size:16px;">'
+            + '<h2>高德 JS API 加载失败</h2>'
+            + '<p>请检查：</p>'
+            + '<ul style="list-style:none;text-align:left;max-width:500px;margin:0 auto;">'
+            + '<li>1. 网络连接是否正常</li>'
+            + '<li>2. API Key 是否正确（Web端 JS API 类型）</li>'
+            + '<li>3. Key 是否已添加 localhost:8080 到白名单</li>'
+            + '</ul></div>';
+    };
+    document.head.appendChild(script);
+
+    /* Fallback: if script doesn't load within 15s, show error */
+    setTimeout(() => {
+        if (typeof AMap === 'undefined') {
+            document.body.innerHTML = '<div style="color:#ff8844;text-align:center;'
+                + 'padding:100px;font-size:16px;">'
+                + '<h2>高德 JS API 加载超时</h2>'
+                + '<p>地图服务无响应，请检查网络或 API Key 配置</p>'
+                + '<p style="font-size:12px;color:#888;">Key 申请: https://lbs.amap.com/ → Web端(JS API)</p>'
+                + '</div>';
+        }
+    }, 15000);
+}
+
+/* ========================================================================
+ *  Map init (called when 高德 SDK loads)
+ * ======================================================================== */
+function onMapSDKReady() {
+    map = new AMap.Map('map', {
+        center: [104.0, 35.0],     /* [lng, lat] — central China default */
+        zoom: baseZoom,
+        mapStyle: 'amap://styles/dark',
+        zoomEnable: true,          /* MUST be true — total gate for setZoom */
+        scrollWheel: false,
+        doubleClickZoom: false,
+        touchZoom: false,
+        dragEnable: false,
+        keyboardEnable: false,
+        showBuildingBlock: false,
+        viewMode: '2D',
+    });
+
+    /* Aircraft marker — use a custom SVG triangle */
+    aircraftMarker = new AMap.Marker({
+        position: [0, 0],
+        content: '<div id="aircraft-icon" style="'
+            + 'width:0;height:0;'
+            + 'border-left:10px solid transparent;'
+            + 'border-right:10px solid transparent;'
+            + 'border-bottom:24px solid #00FF88;'
+            + 'filter:drop-shadow(0 0 6px #00FF88);'
+            + 'transform-origin:10px 16px;'
+            + '"></div>',
+        offset: new AMap.Pixel(-10, -16),
+        zIndex: 999,
+    });
+    map.add(aircraftMarker);
+
+    /* Start polling */
+    fetchData();
+    setInterval(fetchData, POLL_INTERVAL_MS);
+
+    /* Start auto-zoom animation */
+    requestAnimationFrame(autoZoom);
+}
+
+/* ========================================================================
+ *  Data fetching
+ * ======================================================================== */
+async function fetchData() {
+    try {
+        const [posRes, routeRes] = await Promise.all([
+            fetch('/api/position'),
+            fetch('/api/route'),
+        ]);
+        const pos   = await posRes.json();
+        const route = await routeRes.json();
+        updateDisplay(pos, route);
+    } catch(e) { console.error('Fetch error:', e); }
+}
+
+/* ========================================================================
+ *  Display update
+ * ======================================================================== */
+function updateDisplay(pos, route) {
+    /* --- Position interpolation (ease-out) --- */
+    const targetLat = pos.lat, targetLon = pos.lon;
+    if (lastPosition && targetLat !== 0) {
+        const ease = 0.35;
+        const newLat = lastPosition.lat + (targetLat - lastPosition.lat) * ease;
+        const newLon = lastPosition.lon + (targetLon - lastPosition.lon) * ease;
+        lastPosition = { lat: newLat, lon: newLon };
+    } else if (targetLat !== 0) {
+        lastPosition = { lat: targetLat, lon: targetLon };
+    }
+
+    /* --- Update aircraft marker --- */
+    if (lastPosition) {
+        const lnglat = new AMap.LngLat(lastPosition.lon, lastPosition.lat);
+        aircraftMarker.setPosition(lnglat);
+        /* Rotate icon */
+        const icon = document.getElementById('aircraft-icon');
+        if (icon) icon.style.transform = `rotate(${pos.hdg}deg)`;
+    }
+
+    /* --- Route lines --- */
+    if (route.waypoints && route.waypoints.length > 0) {
+        drawRoute(route.waypoints, route.active_idx);
+
+        /* Recompute base zoom when route changes (or first load) */
+        const routeHash = route.waypoints.map(w => w.ident).join('|');
+        if (map && routeHash !== lastRouteHash) {
+            lastRouteHash = routeHash;
+            setTimeout(() => {
+                const path = route.waypoints.map(w => [w.lon, w.lat]);
+                if (path.length >= 2) {
+                    map.setFitView(path, false, [60, 60, 80, 100]);
+                    baseZoom = map.getZoom();
+                    zoomStartTime = Date.now();
+                }
+                initialCentered = true;
+            }, 800);
+        }
+
+        /* Progress */
+        const total = route.total_distance_nm || 0;
+        let flown = 0;
+        if (route.active_idx >= 1 && route.waypoints.length > 1) {
+            for (let i = 1; i < route.active_idx && i < route.waypoints.length; i++) {
+                const a = route.waypoints[i-1], b = route.waypoints[i];
+                flown += haversineNm(a.lat, a.lon, b.lat, b.lon);
+            }
+        }
+        const pct = total > 0 ? Math.min(100, Math.round(flown / total * 100)) : 0;
+        document.getElementById('progress-fill').style.width = pct + '%';
+
+        /* Distance to destination */
+        if (lastPosition && route.waypoints.length > 0) {
+            const dest = route.waypoints[route.waypoints.length - 1];
+            const distNm = haversineNm(lastPosition.lat, lastPosition.lon, dest.lat, dest.lon);
+            document.getElementById('v-dist').innerHTML = Math.round(distNm) + '<span class="data-unit">NM</span>';
+            /* ETA */
+            if (pos.gs_kts > 30 && distNm > 1) {
+                const hrs = distNm / pos.gs_kts;
+                const now = new Date();
+                const eta = new Date(now.getTime() + hrs * 3600000);
+                document.getElementById('v-eta').innerHTML =
+                    eta.toISOString().substr(11,5) + '<span class="data-unit">UTC</span>';
+            } else {
+                document.getElementById('v-eta').innerHTML = '--:--<span class="data-unit">UTC</span>';
+            }
+        }
+    } else {
+        document.getElementById('v-dist').innerHTML = '---<span class="data-unit">NM</span>';
+        document.getElementById('v-eta').innerHTML = '--:--<span class="data-unit">UTC</span>';
+    }
+
+    /* --- Initial centering on aircraft when no route yet --- */
+    if (!initialCentered && lastPosition && map) {
+        map.setZoomAndCenter(10, [lastPosition.lon, lastPosition.lat]);
+        baseZoom = map.getZoom();
+        zoomStartTime = Date.now();
+        initialCentered = true;
+    }
+
+    /* --- Data bar values --- */
+    document.getElementById('v-gs').innerHTML  = Math.round(pos.gs_kts || 0) + '<span class="data-unit">KTS</span>';
+    document.getElementById('v-alt').innerHTML = Math.round(pos.alt_ft || 0) + '<span class="data-unit">FT</span>';
+    document.getElementById('v-hdg').innerHTML = Math.round(pos.hdg || 0) + '<span class="data-unit">°</span>';
+    document.getElementById('v-oat').innerHTML = (pos.oat_c != null ? pos.oat_c.toFixed(1) : '--') + '<span class="data-unit">°C</span>';
+}
+
+/* ========================================================================
+ *  Route drawing
+ * ======================================================================== */
+function drawRoute(waypoints, activeIdx) {
+    if (!map) return;
+
+    /* Clear previous */
+    if (routeLine) { map.remove(routeLine); routeLine = null; }
+    if (flownLine) { map.remove(flownLine); flownLine = null; }
+    if (departureMarker) { map.remove(departureMarker); departureMarker = null; }
+    if (arrivalMarker)  { map.remove(arrivalMarker);  arrivalMarker  = null; }
+    waypointMarkers.forEach(w => { map.remove(w.marker); map.remove(w.label); });
+    waypointMarkers = [];
+
+    if (waypoints.length < 2) return;
+
+    const path = waypoints.map(w => [w.lon, w.lat]);
+
+    /* Flown segment (magenta) */
+    if (activeIdx >= 0 && activeIdx < waypoints.length) {
+        const flownPath = path.slice(0, activeIdx + 1);
+        if (flownPath.length >= 2) {
+            flownLine = new AMap.Polyline({
+                path: flownPath,
+                strokeColor: '#FF00FF',
+                strokeWeight: 4,
+                strokeOpacity: 0.8,
+                lineJoin: 'round',
+                zIndex: 50,
+            });
+            map.add(flownLine);
+        }
+    }
+
+    /* Planned route (cyan) */
+    routeLine = new AMap.Polyline({
+        path: path,
+        strokeColor: '#00FFFF',
+        strokeWeight: 2,
+        strokeOpacity: 0.6,
+        strokeStyle: 'dashed',
+        lineJoin: 'round',
+        zIndex: 40,
+    });
+    map.add(routeLine);
+
+    /* Departure marker (first WP — green) */
+    const dep = waypoints[0];
+    departureMarker = new AMap.Marker({
+        position: [dep.lon, dep.lat],
+        content: '<div style="width:14px;height:14px;border-radius:50%;'
+            + 'background:#00FF40;border:2px solid #fff;'
+            + 'box-shadow:0 0 8px #00FF40;"></div>',
+        offset: new AMap.Pixel(-7, -7),
+        zIndex: 110,
+    });
+    map.add(departureMarker);
+    addTextLabel(dep, waypoints.length > 0 ? waypoints[0].ident : '', '#00FF40');
+
+    /* Arrival marker (last WP — red) */
+    const arr = waypoints[waypoints.length - 1];
+    arrivalMarker = new AMap.Marker({
+        position: [arr.lon, arr.lat],
+        content: '<div style="width:14px;height:14px;border-radius:50%;'
+            + 'background:#FF4444;border:2px solid #fff;'
+            + 'box-shadow:0 0 8px #FF4444;"></div>',
+        offset: new AMap.Pixel(-7, -7),
+        zIndex: 110,
+    });
+    map.add(arrivalMarker);
+    addTextLabel(arr, waypoints[waypoints.length - 1].ident, '#FF6666');
+
+    /* Intermediate waypoint labels */
+    for (let i = 1; i < waypoints.length - 1; i++) {
+        addTextLabel(waypoints[i], waypoints[i].ident, '#88aacc');
+    }
+}
+
+function addTextLabel(wp, text, color) {
+    if (!map || !text) return;
+    const lbl = new AMap.Text({
+        text: text,
+        position: [wp.lon, wp.lat],
+        offset: new AMap.Pixel(0, -22),
+        style: {
+            'color': color,
+            'font-size': '10px',
+            'font-weight': 'bold',
+            'text-shadow': '0 0 4px rgba(0,0,0,0.9)',
+            'background': 'transparent',
+            'border': 'none',
+            'pointer-events': 'none',
+        },
+        zIndex: 105,
+    });
+    map.add(lbl);
+    /* Also add a tiny dot */
+    const dot = new AMap.Marker({
+        position: [wp.lon, wp.lat],
+        content: '<div style="width:5px;height:5px;border-radius:50%;'
+            + 'background:' + color + ';opacity:0.7;"></div>',
+        offset: new AMap.Pixel(-2, -2),
+        zIndex: 100,
+    });
+    map.add(dot);
+    waypointMarkers.push({ marker: dot, label: lbl });
+}
+
+/* ========================================================================
+ *  Auto-zoom (sine-wave cycle, 60 s period)
+ * ======================================================================== */
+function autoZoom() {
+    if (!map || baseZoom <= 0) { requestAnimationFrame(autoZoom); return; }
+
+    const elapsed = (Date.now() - zoomStartTime) / 1000;
+    const phase = (elapsed % ZOOM_CYCLE_S) / ZOOM_CYCLE_S; /* 0..1 */
+    /* sin: 0→+amp→0→-amp→0 over one cycle */
+    const offset = Math.sin(phase * Math.PI * 2) * ZOOM_AMPLITUDE;
+    const targetZoom = baseZoom + offset;
+
+    const currentZoom = map.getZoom();
+    const newZoom = currentZoom + (targetZoom - currentZoom) * 0.05;
+    map.setZoom(newZoom);
+
+    requestAnimationFrame(autoZoom);
+}
+
+/* ========================================================================
+ *  Haversine distance (NM)
+ * ======================================================================== */
+function haversineNm(lat1, lon1, lat2, lon2) {
+    const R = 3440.065; /* Earth radius in nautical miles */
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2)**2
+            + Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180)
+            * Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/* ========================================================================
+ *  Boot
+ * ======================================================================== */
+window.onload = init;
+</script>
+</body>
+</html>

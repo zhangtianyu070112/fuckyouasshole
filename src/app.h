@@ -25,6 +25,7 @@ typedef struct FMCState    FMCState;
 typedef struct MockDataCtx MockDataCtx;
 typedef struct AlertSystem AlertSystem;
 typedef struct UDPSocket   UDPSocket;
+typedef struct CabinServer CabinServer;
 
 /**
  * @brief Top-level application state.
@@ -69,6 +70,9 @@ typedef struct App {
     UDPSocket*     xp_send_sock;
     char           xp_host[64];
     int            xp_send_port;
+
+    /* Cabin display system server */
+    CabinServer*   cabin_server;
 
 } App;
 
