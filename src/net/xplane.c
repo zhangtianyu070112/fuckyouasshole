@@ -68,14 +68,21 @@ static void apply_data_group(FlightDataValues* f, int index,
     /* 3: Speeds */
     case 3:
         if (num_vals > 0) f->ias_kts  = vals[0];
+        if (num_vals > 2) f->tas_kts  = vals[2];
         if (num_vals > 3) f->gs_kts   = vals[3];
-        if (num_vals > 5) f->tas_kts  = vals[5];
         break;
 
     /* 4: Mach, VVI, G-load — XP12 already ft/min */
     case 4:
         if (num_vals > 0) f->mach   = vals[0];
-        if (num_vals > 1) f->vs_fpm = vals[1];
+        if (num_vals > 2) f->vs_fpm = vals[2];  /* VVI is usually at index 2 in group 4 */
+        
+        /* Debug log group 4 to see what it contains */
+        static int print_count = 0;
+        if (print_count++ % 100 == 0) {
+            LOG_INFO("Group 4 debug: [0]=%f, [1]=%f, [2]=%f, [3]=%f, [4]=%f", 
+                     (double)vals[0], (double)vals[1], (double)vals[2], (double)vals[3], (double)vals[4]);
+        }
         break;
 
     /* 17: Pitch, roll, headings */
@@ -197,6 +204,48 @@ static void apply_data_group(FlightDataValues* f, int index,
     case 50:
         for (int i = 0; i < 4 && i < num_vals; i++)
             f->oil_temp_c[i] = vals[i];
+        break;
+
+    /* 43: Manifold pressure */
+    case 43:
+        for (int i = 0; i < 4 && i < num_vals; i++)
+            f->mpr_inhg[i] = vals[i];
+        break;
+
+    /* 44: Engine pressure ratio (EPR) */
+    case 44:
+        for (int i = 0; i < 4 && i < num_vals; i++)
+            f->epr[i] = vals[i];
+        break;
+
+    /* 46: Turbine inlet temperature (ITT) */
+    case 46:
+        for (int i = 0; i < 4 && i < num_vals; i++)
+            f->itt_c[i] = vals[i];
+        break;
+
+    /* 48: Cylinder head temperature (CHT) */
+    case 48:
+        for (int i = 0; i < 4 && i < num_vals; i++)
+            f->cht_c[i] = vals[i];
+        break;
+
+    /* 51: Fuel pressure */
+    case 51:
+        for (int i = 0; i < 4 && i < num_vals; i++)
+            f->fuel_press_psi[i] = vals[i];
+        break;
+
+    /* 34: Engine power */
+    case 34:
+        for (int i = 0; i < 4 && i < num_vals; i++)
+            f->engine_power_hp[i] = vals[i];
+        break;
+
+    /* 37: Engine RPM */
+    case 37:
+        for (int i = 0; i < 4 && i < num_vals; i++)
+            f->engine_rpm[i] = vals[i];
         break;
 
     /* =====================================================================
@@ -421,7 +470,7 @@ int xplane_subscribe(UDPSocket* sock, const char* xp_host,
      * Indices updated for X-Plane 12 Data Output numbering. */
     static const int groups[] = {
         3, 4, 5, 8, 13, 14, 17, 20, 25,        /* flight + controls */
-        41, 42, 45, 47, 49, 50,                  /* engine: N1,N2,FF,EGT,OilP,OilT */
+        34, 37, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51,  /* engine: N1,N2,FF,EGT,OilP,OilT, etc */
         62,                                        /* fuel weights */
         96, 97, 99, 102, 104,                    /* nav/com/dme/xpdr */
         108, 118,                                 /* autopilot */

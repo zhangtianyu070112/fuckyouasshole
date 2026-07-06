@@ -18,6 +18,11 @@
 #include "thread.h"
 #include "utils/logger.h"
 #include "instruments/instrument.h"
+#include "instruments/standalone_fmc.h"
+#include "instruments/standalone_pfd.h"
+#include "instruments/standalone_nd.h"
+#include "instruments/standalone_eicas1.h"
+#include "instruments/standalone_eicas2.h"
 #include "data/flight_data.h"
 #include "data/navdata.h"
 #include "net/udp.h"
@@ -224,6 +229,52 @@ static void init_instruments(App* app)
             app->instruments[i]->on_init(app->instruments[i], app);
         }
     }
+    
+    /* Initialize standalone FMC window */
+    if (config_get_bool(app->config, "instruments", "standalone_fmc_enabled", 1)) {
+        if (standalone_fmc_init(app) != 0) {
+            LOG_ERROR("Failed to init standalone FMC");
+        } else {
+            LOG_INFO("Standalone FMC initialized");
+        }
+    }
+
+    /* Initialize standalone PFD window */
+    if (config_get_bool(app->config, "instruments", "standalone_pfd_enabled", 1)) {
+        if (standalone_pfd_init(app) != 0) {
+            LOG_ERROR("Failed to init standalone PFD");
+        } else {
+            LOG_INFO("Standalone PFD initialized");
+        }
+    }
+
+    /* Initialize standalone ND window */
+    if (config_get_bool(app->config, "instruments", "standalone_nd_enabled", 1)) {
+        if (standalone_nd_init(app) != 0) {
+            LOG_ERROR("Failed to init standalone ND");
+        } else {
+            LOG_INFO("Standalone ND initialized");
+        }
+    }
+
+    /* Initialize standalone EICAS1 window */
+    if (config_get_bool(app->config, "instruments", "standalone_eicas1_enabled", 1)) {
+        if (standalone_eicas1_init(app) != 0) {
+            LOG_ERROR("Failed to init standalone EICAS1");
+        } else {
+            LOG_INFO("Standalone EICAS1 initialized");
+        }
+    }
+
+    /* Initialize standalone EICAS2 window */
+    if (config_get_bool(app->config, "instruments", "standalone_eicas2_enabled", 1)) {
+        if (standalone_eicas2_init(app) != 0) {
+            LOG_ERROR("Failed to init standalone EICAS2");
+        } else {
+            LOG_INFO("Standalone EICAS2 initialized");
+        }
+    }
+
     LOG_INFO("All instruments initialized");
 }
 
@@ -232,6 +283,12 @@ static void init_instruments(App* app)
  */
 static void destroy_instruments(App* app)
 {
+    standalone_fmc_destroy();
+    standalone_pfd_destroy();
+    standalone_nd_destroy();
+    standalone_eicas1_destroy();
+    standalone_eicas2_destroy();
+
     for (int i = 0; i < app->instrument_count; i++) {
         if (app->instruments[i]) {
             if (app->instruments[i]->on_destroy) {
@@ -494,6 +551,11 @@ static void main_loop(App* app)
                 inst->on_update(inst, app->flight_data, app->delta_time);
             }
         }
+        standalone_fmc_update(app->flight_data, app->delta_time);
+        standalone_pfd_update(app->flight_data, app->delta_time);
+        standalone_nd_update(app->flight_data, app->delta_time);
+        standalone_eicas1_update(app->flight_data, app->delta_time);
+        standalone_eicas2_update(app->flight_data, app->delta_time);
 
         /* 5. Render */
         SDL_SetRenderDrawColor(app->renderer, 10, 10, 15, 255);
@@ -514,6 +576,12 @@ static void main_loop(App* app)
         first_frame2 = 0;
         SDL_RenderSetClipRect(app->renderer, NULL);
         SDL_RenderPresent(app->renderer);
+        
+        standalone_fmc_render();
+        standalone_pfd_render();
+        standalone_nd_render();
+        standalone_eicas1_render();
+        standalone_eicas2_render();
 
         /* 6. Frame rate cap */
         if (app->target_frame_time > 0.0f) {
@@ -551,6 +619,22 @@ static int on_quit_event(const SDL_Event* event, void* userdata)
  */
 static int instrument_event_bridge(const SDL_Event* event, void* userdata)
 {
+    if (standalone_fmc_event(event)) {
+        return 1;
+    }
+    if (standalone_pfd_event(event)) {
+        return 1;
+    }
+    if (standalone_nd_event(event)) {
+        return 1;
+    }
+    if (standalone_eicas1_event(event)) {
+        return 1;
+    }
+    if (standalone_eicas2_event(event)) {
+        return 1;
+    }
+
     App* app = (App*)userdata;
     for (int i = 0; i < app->instrument_count; i++) {
         Instrument* inst = app->instruments[i];

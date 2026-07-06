@@ -50,6 +50,15 @@ typedef struct FlightDataValues {
     float oil_press_psi[4];   /* Oil pressure (psi) */
     float oil_temp_c[4];      /* Oil temperature (°C) */
 
+    /* --- Extra Engine Data from index.txt --- */
+    float mpr_inhg[4];        /* Manifold pressure (inHg) */
+    float epr[4];             /* Engine pressure ratio (EPR) */
+    float itt_c[4];           /* Turbine inlet temperature (ITT, °C) */
+    float cht_c[4];           /* Cylinder head temperature (CHT, °C) */
+    float fuel_press_psi[4];  /* Fuel pressure (psi) */
+    float engine_power_hp[4]; /* Engine power (hp or watts depending on XP) */
+    float engine_rpm[4];      /* Engine RPM */
+
     /* --- Fuel --- */
     float fuel_total_lbs;     /* Total fuel remaining (lbs) */
     float fuel_flow_total_pph;/* Total fuel flow (lbs/hour) */

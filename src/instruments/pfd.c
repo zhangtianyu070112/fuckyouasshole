@@ -59,8 +59,8 @@
  *  Layout constants (percentages)
  * ========================================================================= */
 
-#define FMA_H_PCT      5
-#define THRUST_H_PCT   4
+#define FMA_H_PCT      6
+#define THRUST_H_PCT   12
 #define HEADING_H_PCT  8
 #define GAP_W_PCT      4
 #define SPD_W_PCT      10
@@ -101,7 +101,7 @@ static void compute_layout(const SDL_Rect* rect, PFDLayout* lay)
     lay->thrust_h = rect->h * THRUST_H_PCT / 100;
     lay->thrust_y = rect->y + lay->fma_h;
 
-    lay->hdg_h    = rect->h * HEADING_H_PCT / 100;
+    lay->hdg_h    = 70; /* Fixed height for compass area as requested */
     lay->hdg_y    = rect->y + rect->h - lay->hdg_h;
 
     lay->main_y   = rect->y + lay->fma_h + lay->thrust_h;
@@ -157,6 +157,15 @@ typedef struct {
     float smooth_hdg;
     float smooth_vs;
     float smooth_n1[2];
+
+    /* For robust VSI calculation */
+    float last_alt_for_vsi;
+    int   last_alt_valid;
+
+    /* For robust Pitch Rate calculation */
+    float last_pitch_for_rate;
+    int   last_pitch_valid;
+    float smooth_pitch_rate;
 
     /* Latest flight data snapshot */
     FlightDataValues fd;
@@ -268,14 +277,21 @@ static void draw_attitude_indicator(SDL_Renderer* r, const PFDLayout* lay,
                         cx + (int)rr.x, cy + (int)rr.y, 3);
     }
 
-    /* ---- Pitch ladder (every 5°, major at 10°) ---- */
-    for (int p_deg = -30; p_deg <= 30; p_deg += 5) {
-        if (p_deg == 0) continue;
+    /* ---- Pitch ladder (every 2.5°, major at 10°, mid at 5°) ---- */
+    for (float p_deg_f = -180.0f; p_deg_f <= 180.0f; p_deg_f += 2.5f) {
+        if (fabsf(p_deg_f) < 0.1f) continue;
+        
+        /* Only display range current_pitch - 20 to current_pitch + 20 */
+        if (p_deg_f < pitch - 20.0f || p_deg_f > pitch + 20.0f) continue;
 
-        float y_offset = (float)(p_deg) * scale - horizon_offset;
-        if (fabsf(y_offset) > (float)R * 0.92f) continue;
-
-        int line_w = (p_deg % 10 == 0) ? R / 3 : R / 6;
+        float y_offset = p_deg_f * scale - horizon_offset;
+        
+        int is_major = (fmodf(fabsf(p_deg_f), 10.0f) < 0.1f);
+        int is_mid = (fmodf(fabsf(p_deg_f), 5.0f) < 0.1f);
+        int line_w;
+        if (is_major) line_w = R / 3;
+        else if (is_mid) line_w = R / 5;
+        else line_w = R / 8;
 
         Vec2f left  = vec2f((float)(-line_w), -y_offset);
         Vec2f right = vec2f((float)(line_w),  -y_offset);
@@ -285,15 +301,29 @@ static void draw_attitude_indicator(SDL_Renderer* r, const PFDLayout* lay,
         set_color(r, COL_HORIZON_WHITE);
         SDL_RenderDrawLine(r, cx + (int)lr.x, cy + (int)lr.y,
                            cx + (int)rr.x, cy + (int)rr.y);
+        /* If pitch is negative, draw downward ticks at ends of lines */
+        if (p_deg_f < 0.0f && is_major) {
+            Vec2f l_tick = vec2f((float)(-line_w), -y_offset + 5.0f);
+            Vec2f r_tick = vec2f((float)(line_w),  -y_offset + 5.0f);
+            Vec2f ltr = vec2f_rotate(l_tick, -roll);
+            Vec2f rtr = vec2f_rotate(r_tick, -roll);
+            SDL_RenderDrawLine(r, cx + (int)lr.x, cy + (int)lr.y, cx + (int)ltr.x, cy + (int)ltr.y);
+            SDL_RenderDrawLine(r, cx + (int)rr.x, cy + (int)rr.y, cx + (int)rtr.x, cy + (int)rtr.y);
+        }
 
         /* Numeric label for 10° bars */
-        if (p_deg % 10 == 0) {
-            char p_lbl[4];
-            snprintf(p_lbl, sizeof(p_lbl), "%d", p_deg);
+        if (is_major) {
+            char p_lbl[16];
+            snprintf(p_lbl, sizeof(p_lbl), "%d", (int)fabsf(p_deg_f));
             Vec2f lbl_pos = vec2f((float)(-line_w - 18), -y_offset);
             Vec2f lr2 = vec2f_rotate(lbl_pos, -roll);
             set_color(r, COL_HORIZON_WHITE);
             font_draw_scaled_aligned(r, cx + (int)lr2.x, cy + (int)lr2.y,
+                                     p_lbl, 0.40f, FONT_REGULAR, FONT_ALIGN_CENTER);
+            
+            Vec2f lbl_pos_r = vec2f((float)(line_w + 18), -y_offset);
+            Vec2f rr2 = vec2f_rotate(lbl_pos_r, -roll);
+            font_draw_scaled_aligned(r, cx + (int)rr2.x, cy + (int)rr2.y,
                                      p_lbl, 0.40f, FONT_REGULAR, FONT_ALIGN_CENTER);
         }
     }
@@ -312,11 +342,7 @@ static void draw_attitude_indicator(SDL_Renderer* r, const PFDLayout* lay,
             int y2 = cy + (int)(inner_r * sinf(rad));
             SDL_RenderDrawLine(r, x1, y1, x2, y2);
         }
-    }
-
-    /* ---- Roll pointer (fixed triangle at top) ---- */
-    {
-        set_color(r, COL_HORIZON_WHITE);
+        /* Top solid triangle (static pointer for roll scale) */
         int tri_x = cx;
         int tri_y = cy - R + 4;
         SDL_RenderDrawLine(r, tri_x, tri_y, tri_x - 8, tri_y - 12);
@@ -324,17 +350,51 @@ static void draw_attitude_indicator(SDL_Renderer* r, const PFDLayout* lay,
         SDL_RenderDrawLine(r, tri_x - 8, tri_y - 12, tri_x + 8, tri_y - 12);
     }
 
+    /* ---- Roll pointer (dynamic hollow triangle at top, rotates with roll) ---- */
+    {
+        set_color(r, COL_HORIZON_WHITE);
+        float rad = (float)DEG2RAD(-90.0 - roll);
+        float ptr_r = (float)R - 30.0f;
+        int tri_cx = cx + (int)(ptr_r * cosf(rad));
+        int tri_cy = cy + (int)(ptr_r * sinf(rad));
+        
+        Vec2f p1 = vec2f_rotate(vec2f(0.0f, -12.0f), -roll);
+        Vec2f p2 = vec2f_rotate(vec2f(-8.0f, 0.0f), -roll);
+        Vec2f p3 = vec2f_rotate(vec2f(8.0f, 0.0f), -roll);
+        
+        SDL_RenderDrawLine(r, tri_cx + (int)p1.x, tri_cy + (int)p1.y, tri_cx + (int)p2.x, tri_cy + (int)p2.y);
+        SDL_RenderDrawLine(r, tri_cx + (int)p2.x, tri_cy + (int)p2.y, tri_cx + (int)p3.x, tri_cy + (int)p3.y);
+        SDL_RenderDrawLine(r, tri_cx + (int)p3.x, tri_cy + (int)p3.y, tri_cx + (int)p1.x, tri_cy + (int)p1.y);
+    }
+
     /* ---- Aircraft reference symbol (centre, fixed) ---- */
     {
-        /* Wings */
+        /* Central L-shaped markers */
+        set_color(r, COL_BACKGROUND);
+        
+        /* Left L marker */
+        SDL_Rect left_h = { cx - 55, cy - 2, 33, 5 };
+        SDL_Rect left_v = { cx - 27, cy - 2, 5, 20 };
+        SDL_RenderFillRect(r, &left_h);
+        SDL_RenderFillRect(r, &left_v);
+        
+        /* Right L marker */
+        SDL_Rect right_h = { cx + 22, cy - 2, 33, 5 };
+        SDL_Rect right_v = { cx + 22, cy - 2, 5, 20 };
+        SDL_RenderFillRect(r, &right_h);
+        SDL_RenderFillRect(r, &right_v);
+
+        /* Borders for L markers */
         set_color(r, COL_TEXT_AMBER);
-        SDL_RenderDrawLine(r, cx - 55, cy, cx - 22, cy);
-        SDL_RenderDrawLine(r, cx + 22, cy, cx + 55, cy);
-        /* Fuselage dot */
+        SDL_RenderDrawRect(r, &left_h);
+        SDL_RenderDrawRect(r, &left_v);
+        SDL_RenderDrawRect(r, &right_h);
+        SDL_RenderDrawRect(r, &right_v);
+        
+        /* Central dot */
         draw_filled_circle(r, cx, cy, 4);
-        /* Nose */
-        set_color(r, COL_HORIZON_WHITE);
-        SDL_RenderDrawLine(r, cx, cy, cx, cy - 16);
+        
+        /* Remove the nose line, just keep the Ls and the dot */
     }
 
     /* ---- Circle border ---- */
@@ -395,26 +455,66 @@ static void draw_airspeed_tape(SDL_Renderer* r, const PFDLayout* lay,
         }
     }
 
-    /* ---- Current IAS window (fixed centre box) ---- */
+    /* ---- Current IAS window (Polygon Box) ---- */
     int box_h = 32;
-    set_color(r, COL_TAPE_BG);
-    SDL_Rect ias_box = { tape_l + 1, tape_mid - box_h / 2,
-                          tape_w - 2, box_h };
-    SDL_RenderFillRect(r, &ias_box);
+    set_color(r, COL_BACKGROUND);
+    
+    /* Draw polygon for current speed box (with a pointer extending right) */
+    /*
+        p1(tape_l, top) -------- p2(tape_r - 8, top)
+        |                              \
+        |                               \ p3(tape_r, mid)
+        |                               /
+        |                              /
+        p5(tape_l, bot) -------- p4(tape_r - 8, bot)
+    */
+    int ptr_x = tape_r;
+    int right_edge = tape_r - 8;
+    int top_y = tape_mid - box_h / 2;
+    int bot_y = tape_mid + box_h / 2;
+    
+    SDL_Rect ias_box_main = { tape_l, top_y, right_edge - tape_l, box_h };
+    SDL_RenderFillRect(r, &ias_box_main);
+    
+    /* Filled triangle for the pointer part */
+    for (int y = top_y; y <= bot_y; y++) {
+        int x_end;
+        if (y <= tape_mid) {
+            float t = (float)(y - top_y) / (float)(tape_mid - top_y);
+            x_end = right_edge + (int)(t * 8.0f);
+        } else {
+            float t = (float)(bot_y - y) / (float)(bot_y - tape_mid);
+            x_end = right_edge + (int)(t * 8.0f);
+        }
+        SDL_RenderDrawLine(r, right_edge, y, x_end, y);
+    }
+    
     set_color(r, COL_HORIZON_WHITE);
-    SDL_RenderDrawRect(r, &ias_box);
+    SDL_RenderDrawLine(r, tape_l, top_y, right_edge, top_y);
+    SDL_RenderDrawLine(r, right_edge, top_y, ptr_x, tape_mid);
+    SDL_RenderDrawLine(r, ptr_x, tape_mid, right_edge, bot_y);
+    SDL_RenderDrawLine(r, right_edge, bot_y, tape_l, bot_y);
+    SDL_RenderDrawLine(r, tape_l, bot_y, tape_l, top_y);
 
     {
         char ias_str[8];
         snprintf(ias_str, sizeof(ias_str), "%d", (int)ias);
         set_color(r, COL_HORIZON_WHITE);
-        draw_text_simple(r, tape_l + tape_w / 2, tape_mid, ias_str, 0.85f);
+        draw_text_simple(r, tape_l + (right_edge - tape_l) / 2, tape_mid, ias_str, 0.85f);
     }
 
     /* ---- "SPD" label below box ---- */
     set_color(r, COL_HORIZON_WHITE);
     draw_text_simple(r, tape_l + tape_w / 2,
                      tape_mid + box_h / 2 + 7, "SPD", 0.55f);
+
+    /* ---- Target Speed (Magenta) at top ---- */
+    if (f->ap_spd > 0.0f) {
+        char tgt_str[8];
+        snprintf(tgt_str, sizeof(tgt_str), "%d", (int)f->ap_spd);
+        set_color(r, COL_MAGENTA);
+        draw_text_simple(r, tape_l + tape_w / 2, tape_y - 12, tgt_str, 0.65f);
+    }
 
     /* ---- Mach number ---- */
     if (f->mach > 0.40f) {
@@ -425,16 +525,19 @@ static void draw_airspeed_tape(SDL_Renderer* r, const PFDLayout* lay,
                          tape_mid + box_h / 2 + 22, mach_str, 0.48f);
     }
 
-    /* ---- AP speed bug (magenta) ---- */
+    /* ---- AP speed bug (magenta hollow polygon) ---- */
     if (f->ap_spd > 0.0f) {
         float bug_y = (float)tape_mid - (f->ap_spd - ias) * px_kt;
         if (bug_y > (float)tape_y && bug_y < (float)(tape_y + tape_h)) {
             set_color(r, COL_MAGENTA);
-            /* Triangle on right edge */
-            SDL_RenderDrawLine(r, tape_r + 1, (int)bug_y - 4,
-                               tape_r + 1, (int)bug_y + 4);
-            SDL_RenderDrawLine(r, tape_r + 1, (int)bug_y,
-                               tape_r + 7, (int)bug_y);
+            /* Hollow polygon pointing to the right edge */
+            int bx = tape_r;
+            int by = (int)bug_y;
+            SDL_RenderDrawLine(r, bx, by, bx + 6, by - 5);
+            SDL_RenderDrawLine(r, bx + 6, by - 5, bx + 12, by - 5);
+            SDL_RenderDrawLine(r, bx + 12, by - 5, bx + 12, by + 5);
+            SDL_RenderDrawLine(r, bx + 12, by + 5, bx + 6, by + 5);
+            SDL_RenderDrawLine(r, bx + 6, by + 5, bx, by);
         }
     }
 }
@@ -463,28 +566,19 @@ static void draw_altitude_tape(SDL_Renderer* r, const PFDLayout* lay,
     set_color(r, COL_BOX_BORDER);
     SDL_RenderDrawRect(r, &bg);
 
-    /* ---- Alternating bands + tick marks (continuous scrolling) ---- */
+    /* ---- Tick marks (continuous scrolling) ---- */
     float alt_floor = floorf(alt / 100.0f) * 100.0f;
     for (float a = alt_floor - 700.0f; a <= alt + 700.0f; a += 100.0f) {
         float y_pos = (float)tape_mid - (a - alt) * px_ft;
         if (y_pos < (float)tape_y - 3.0f || y_pos > (float)(tape_y + tape_h) + 3.0f)
             continue;
 
-        /* Alternating background bands */
-        int band_h = (int)(100.0f * px_ft) + 1;
-        if (((int)a / 100) % 2 == 0)
-            set_color(r, COL_TAPE_BG);
-        else
-            set_color(r, COL_TAPE_BG_ALT);
-        SDL_Rect band = { tape_l, (int)y_pos - band_h / 2, tape_w, band_h };
-        SDL_RenderFillRect(r, &band);
-
         /* Tick line */
         set_color(r, COL_HORIZON_WHITE);
-        int tick_w = ((int)a % 500 == 0) ? tape_w * 2 / 3 : tape_w / 3;
+        int tick_w = ((int)a % 200 == 0) ? tape_w * 2 / 3 : tape_w / 3;
         SDL_RenderDrawLine(r, tape_l, (int)y_pos, tape_l + tick_w, (int)y_pos);
 
-        /* Label (last 3 digits) */
+        /* Label (last 3 digits), ONLY if divisible by 200 */
         if ((int)a % 200 == 0) {
             int a_mod = (int)a % 1000;
             if (a_mod < 0) a_mod += 1000;
@@ -496,26 +590,66 @@ static void draw_altitude_tape(SDL_Renderer* r, const PFDLayout* lay,
         }
     }
 
-    /* ---- Current ALT window (fixed centre box) ---- */
+    /* ---- Current ALT window (Polygon Box) ---- */
     int box_h = 32;
-    set_color(r, COL_TAPE_BG);
-    SDL_Rect alt_box = { tape_l + 1, tape_mid - box_h / 2,
-                          tape_w - 2, box_h };
-    SDL_RenderFillRect(r, &alt_box);
+    set_color(r, COL_BACKGROUND);
+    
+    /* Draw polygon for current alt box (with a pointer extending left) */
+    /*
+        p2(tape_l + 8, top) -------- p3(tape_r, top)
+             /                              |
+            / p1(tape_l, mid)               |
+            \                               |
+             \                              |
+        p5(tape_l + 8, bot) -------- p4(tape_r, bot)
+    */
+    int ptr_x = tape_l;
+    int left_edge = tape_l + 8;
+    int top_y = tape_mid - box_h / 2;
+    int bot_y = tape_mid + box_h / 2;
+    
+    SDL_Rect alt_box_main = { left_edge, top_y, tape_r - left_edge, box_h };
+    SDL_RenderFillRect(r, &alt_box_main);
+    
+    /* Filled triangle for the pointer part */
+    for (int y = top_y; y <= bot_y; y++) {
+        int x_start;
+        if (y <= tape_mid) {
+            float t = (float)(y - top_y) / (float)(tape_mid - top_y);
+            x_start = left_edge - (int)(t * 8.0f);
+        } else {
+            float t = (float)(bot_y - y) / (float)(bot_y - tape_mid);
+            x_start = left_edge - (int)(t * 8.0f);
+        }
+        SDL_RenderDrawLine(r, x_start, y, left_edge, y);
+    }
+    
     set_color(r, COL_HORIZON_WHITE);
-    SDL_RenderDrawRect(r, &alt_box);
+    SDL_RenderDrawLine(r, left_edge, top_y, tape_r, top_y);
+    SDL_RenderDrawLine(r, tape_r, top_y, tape_r, bot_y);
+    SDL_RenderDrawLine(r, tape_r, bot_y, left_edge, bot_y);
+    SDL_RenderDrawLine(r, left_edge, bot_y, ptr_x, tape_mid);
+    SDL_RenderDrawLine(r, ptr_x, tape_mid, left_edge, top_y);
 
     {
         char alt_str[8];
-        snprintf(alt_str, sizeof(alt_str), "%d", (int)alt);
+        snprintf(alt_str, sizeof(alt_str), "%05d", (int)alt);
         set_color(r, COL_HORIZON_WHITE);
-        draw_text_simple(r, tape_l + tape_w / 2, tape_mid, alt_str, 0.85f);
+        draw_text_simple(r, left_edge + (tape_r - left_edge) / 2, tape_mid, alt_str, 0.85f);
     }
 
     /* ---- "ALT" label below box ---- */
     set_color(r, COL_HORIZON_WHITE);
     draw_text_simple(r, tape_l + tape_w / 2,
                      tape_mid + box_h / 2 + 7, "ALT", 0.55f);
+
+    /* ---- Target Altitude (Magenta) at top ---- */
+    if (f->ap_alt > 0.0f) {
+        char tgt_str[8];
+        snprintf(tgt_str, sizeof(tgt_str), "%05d", (int)f->ap_alt);
+        set_color(r, COL_MAGENTA);
+        draw_text_simple(r, tape_l + tape_w / 2, tape_y - 12, tgt_str, 0.65f);
+    }
 
     /* ---- Barometric setting ---- */
     {
@@ -535,14 +669,19 @@ static void draw_altitude_tape(SDL_Renderer* r, const PFDLayout* lay,
                          tape_mid + box_h / 2 + 36, ra_str, 0.48f);
     }
 
-    /* ---- AP altitude bug (magenta) ---- */
+    /* ---- AP altitude bug (magenta hollow polygon) ---- */
     if (f->ap_alt > 0.0f) {
         float bug_y = (float)tape_mid - (f->ap_alt - alt) * px_ft;
         if (bug_y > (float)tape_y && bug_y < (float)(tape_y + tape_h)) {
             set_color(r, COL_MAGENTA);
-            SDL_RenderDrawLine(r, tape_l - 6, (int)bug_y, tape_l - 1, (int)bug_y);
-            SDL_RenderDrawLine(r, tape_l - 1, (int)bug_y - 4,
-                               tape_l - 1, (int)bug_y + 4);
+            /* Hollow polygon pointing to the left edge */
+            int bx = tape_l;
+            int by = (int)bug_y;
+            SDL_RenderDrawLine(r, bx, by, bx - 6, by - 5);
+            SDL_RenderDrawLine(r, bx - 6, by - 5, bx - 12, by - 5);
+            SDL_RenderDrawLine(r, bx - 12, by - 5, bx - 12, by + 5);
+            SDL_RenderDrawLine(r, bx - 12, by + 5, bx - 6, by + 5);
+            SDL_RenderDrawLine(r, bx - 6, by + 5, bx, by);
         }
     }
 }
@@ -561,180 +700,259 @@ static void draw_vsi(SDL_Renderer* r, const PFDLayout* lay,
     int vsi_h   = lay->main_h * 70 / 100;
     int vsi_y   = lay->main_y + (lay->main_h - vsi_h) / 2;
 
-    float vs_fpm    = f->vs_fpm;
-    float px_kfpm   = (float)vsi_h / 12.0f;   /* 12 kfpm total range (±6) */
+    float vs_fpm = f->vs_fpm;
 
     /* ---- Background ---- */
+    /* Draw a bridge-like shape. We will use standard lines/rects for now to simulate the "bridge" */
     set_color(r, COL_TAPE_BG);
     SDL_Rect bg = { vsi_l, vsi_y, vsi_w, vsi_h };
     SDL_RenderFillRect(r, &bg);
+    
     set_color(r, COL_BOX_BORDER);
-    SDL_RenderDrawRect(r, &bg);
+    /* Draw a custom border: left line is solid, right line is solid, but we cap top and bottom */
+    SDL_RenderDrawLine(r, vsi_l, vsi_y, vsi_r, vsi_y);                 /* Top */
+    SDL_RenderDrawLine(r, vsi_l, vsi_y + vsi_h, vsi_r, vsi_y + vsi_h); /* Bottom */
+    SDL_RenderDrawLine(r, vsi_l, vsi_y, vsi_l, vsi_y + vsi_h);         /* Left */
+    SDL_RenderDrawLine(r, vsi_r, vsi_y, vsi_r, vsi_y + vsi_h);         /* Right */
+
+    /* ---- Zero line ---- */
+    set_color(r, COL_HORIZON_WHITE);
+    SDL_RenderDrawLine(r, vsi_l, vsi_mid, vsi_r - 2, vsi_mid);
+
+    /* ---- Scale mapping logic ----
+     * The scale is non-linear according to prompt:
+     * 0 to 2 (x1000) is linear, taking up half the top half of VSI height.
+     * 2 to 6 (x1000) is linear, taking up the other half of the top half.
+     * So:
+     *   0..2000 ft/min maps to 0..25% of total height from center.
+     *   2000..6000 ft/min maps to 25%..50% of total height from center.
+     * Same for negative values (bottom half).
+     */
+    float px_per_k_low = ((float)vsi_h / 4.0f) / 2.0f;  /* pixels per 1000 ft/min for 0-2000 range */
+    float px_per_k_hi  = ((float)vsi_h / 4.0f) / 4.0f;  /* pixels per 1000 ft/min for 2000-6000 range */
 
     /* ---- Scale tick marks & labels ---- */
-    static const int vs_ticks[] = { -6, -4, -2, -1, 1, 2, 4, 6 };
-    for (int i = 0; i < 8; i++) {
-        int v = vs_ticks[i];
-        float y_pos = (float)vsi_mid - (float)v * px_kfpm;
+    /* Positive ticks: 0.5, 1.0, 1.5, 2.0, 4.0, 6.0 (x1000 ft/min) */
+    /* Negative ticks: -0.5, -1.0, -1.5, -2.0, -4.0, -6.0 */
+    static const float vs_ticks_k[] = { 0.5f, 1.0f, 1.5f, 2.0f, 4.0f, 6.0f,
+                                       -0.5f, -1.0f, -1.5f, -2.0f, -4.0f, -6.0f };
+    for (int i = 0; i < 12; i++) {
+        float v_k = vs_ticks_k[i];
+        
+        /* Calculate y_offset inline */
+        float abs_vs_k = fabsf(v_k);
+        float offset = 0.0f;
+        if (abs_vs_k <= 2.0f) {
+            offset = abs_vs_k * px_per_k_low;
+        } else {
+            offset = (2.0f * px_per_k_low) + ((abs_vs_k - 2.0f) * px_per_k_hi);
+        }
+        float y_offset = (v_k >= 0.0f) ? -offset : offset;
+        
+        float y_pos = (float)vsi_mid + y_offset;
+        
         if (y_pos < (float)vsi_y + 2.0f || y_pos > (float)(vsi_y + vsi_h) - 2.0f)
             continue;
 
-        int tick_w = (abs(v) % 2 == 0) ? vsi_w * 2 / 3 : vsi_w / 3;
+        /* Minor ticks for 0.5, 1.5; Major for 1.0, 2.0, 4.0, 6.0 */
+        int is_major = (fmodf(fabsf(v_k), 1.0f) < 0.1f || fmodf(fabsf(v_k), 2.0f) < 0.1f);
+        int tick_w = is_major ? vsi_w * 2 / 3 : vsi_w / 3;
+        
         set_color(r, COL_HORIZON_WHITE);
-        SDL_RenderDrawLine(r, vsi_l + 2, (int)y_pos,
-                           vsi_l + 2 + tick_w, (int)y_pos);
+        SDL_RenderDrawLine(r, vsi_l, (int)y_pos, vsi_l + tick_w, (int)y_pos);
 
-        /* Label at even thousands */
-        if (abs(v) % 2 == 0) {
-            char lbl[4];
-            snprintf(lbl, sizeof(lbl), "%d", abs(v));
-            set_color(r, COL_HORIZON_WHITE);
-            font_draw_scaled_aligned(r, vsi_r - 1, (int)y_pos,
+        /* Labels for major ticks (1, 2, 4, 6) */
+        if (is_major) {
+            char lbl[16];
+            snprintf(lbl, sizeof(lbl), "%d", (int)fabsf(v_k));
+            font_draw_scaled_aligned(r, vsi_r - 2, (int)y_pos,
                                      lbl, 0.42f, FONT_REGULAR, FONT_ALIGN_RIGHT);
         }
     }
 
-    /* ---- Zero line ---- */
-    set_color(r, COL_HORIZON_WHITE);
-    SDL_RenderDrawLine(r, vsi_l + 2, vsi_mid, vsi_r - 2, vsi_mid);
-
     /* ---- Pointer (moving triangle on left) ---- */
-    float vs_kfpm = clamp_f(vs_fpm / 1000.0f, -5.8f, 5.8f);
-    int ptr_y = (int)((float)vsi_mid - vs_kfpm * px_kfpm);
+    float vs_clamped = clamp_f(vs_fpm, -6000.0f, 6000.0f);
+    
+    /* Calculate pointer y_offset inline */
+    float abs_vs_k_ptr = fabsf(vs_clamped) / 1000.0f;
+    float ptr_offset = 0.0f;
+    if (abs_vs_k_ptr <= 2.0f) {
+        ptr_offset = abs_vs_k_ptr * px_per_k_low;
+    } else {
+        ptr_offset = (2.0f * px_per_k_low) + ((abs_vs_k_ptr - 2.0f) * px_per_k_hi);
+    }
+    float ptr_y_offset = (vs_clamped >= 0.0f) ? -ptr_offset : ptr_offset;
+    
+    int ptr_y = (int)((float)vsi_mid + ptr_y_offset);
     ptr_y = clamp_i(ptr_y, vsi_y + 1, vsi_y + vsi_h - 1);
 
+    /* Pointer is a diagonal line from middle-right to left scale */
     set_color(r, COL_CYAN);
-    SDL_RenderDrawLine(r, vsi_l + 2, ptr_y - 4, vsi_l + 8, ptr_y);
-    SDL_RenderDrawLine(r, vsi_l + 2, ptr_y + 4, vsi_l + 8, ptr_y);
-    SDL_RenderDrawLine(r, vsi_l + 8, ptr_y, vsi_l + 2, ptr_y - 4);
+    draw_thick_line(r, vsi_r - 4, vsi_mid, vsi_l, ptr_y, 3);
 
     /* ---- Digital readout ---- */
+    /* Always display readout for debugging purposes */
     char vs_str[16];
-    int vs_abs = (int)fabsf(vs_fpm);
-    if (vs_fpm >= 50.0f)
-        snprintf(vs_str, sizeof(vs_str), "+%d", vs_abs);
-    else if (vs_fpm <= -50.0f)
-        snprintf(vs_str, sizeof(vs_str), "-%d", vs_abs);
-    else
-        snprintf(vs_str, sizeof(vs_str), "0");
+    int vs_display = ((int)(fabsf(vs_fpm) / 50.0f)) * 50; /* rounded to nearest 50 */
+    snprintf(vs_str, sizeof(vs_str), "%d", vs_display);
 
-    int readout_y = ptr_y;
-    if (readout_y < vsi_y + 10) readout_y = vsi_y + 10;
-    if (readout_y > vsi_y + vsi_h - 10) readout_y = vsi_y + vsi_h - 10;
-
-    set_color(r, COL_TEXT_GREEN);
-    font_draw_scaled_aligned(r, vsi_l + vsi_w / 2, readout_y - 10,
-                             vs_str, 0.52f, FONT_BOLD, FONT_ALIGN_CENTER);
-
-    /* ---- "V/S" label at bottom ---- */
+    int readout_y = (vs_fpm >= 0) ? (vsi_y - 15) : (vsi_y + vsi_h + 15);
+    
     set_color(r, COL_HORIZON_WHITE);
-    draw_text_simple(r, vsi_l + vsi_w / 2,
-                     vsi_y + vsi_h + 8, "V/S", 0.42f);
+    font_draw_scaled_aligned(r, vsi_l + vsi_w / 2, readout_y,
+                             vs_str, 0.55f, FONT_BOLD, FONT_ALIGN_CENTER);
 }
 
 /* =========================================================================
- *  Heading tape (bottom) — improved compass-rose style
+ *  Heading tape (bottom) — Half-Compass Rose style
  * ========================================================================= */
 
 static void draw_heading_tape(SDL_Renderer* r, const SDL_Rect* rect,
                                const PFDLayout* lay, const FlightDataValues* f)
 {
     int tape_y     = lay->hdg_y;
-    int tape_h     = lay->hdg_h;
     int tape_mid_x = rect->x + rect->w / 2;
-    int tape_mid_y = lay->hdg_mid_y;
-    float hdg      = f->heading_true_deg;
-    float px_deg   = 6.0f;
+    
+    /* Radius and Center: radius = width / 3.2.
+       Center Y is placed so the top of the arc touches the top of the heading area (tape_y).
+    */
+    float R = (float)rect->w / 3.2f;
+    int cx = tape_mid_x;
+    int cy = tape_y + (int)R;
+
+    float hdg = f->heading_mag_deg; /* Use magnetic heading as requested */
 
     /* ---- Background ---- */
+    /* Remove grey background and border as requested */
+    /*
     set_color(r, COL_TAPE_BG);
     SDL_Rect bg = { rect->x, tape_y, rect->w, tape_h };
     SDL_RenderFillRect(r, &bg);
     set_color(r, COL_BOX_BORDER);
     SDL_RenderDrawRect(r, &bg);
+    */
 
-    /* ---- Ticks every 5°, major every 10°, labelled at 30° steps ---- */
-    /*     Continuous scrolling: tick x = center + (heading_value - hdg) * px_deg */
+    /* ---- Compass Rose Arc Background ---- */
+    /* We can draw a filled arc or circle portion here using points, but simply drawing the outline is fine */
+    set_color(r, COL_LINE_GRAY);
+    for (int i = -60; i <= 60; i++) {
+        float a1 = (float)i * (float)M_PI / 180.0f - (float)M_PI / 2.0f;
+        float a2 = (float)(i + 1) * (float)M_PI / 180.0f - (float)M_PI / 2.0f;
+        SDL_RenderDrawLine(r,
+                           cx + (int)(R * cosf(a1)), cy + (int)(R * sinf(a1)),
+                           cx + (int)(R * cosf(a2)), cy + (int)(R * sinf(a2)));
+    }
+
+    /* ---- Ticks and Labels ---- */
+    /* Draw ticks every 5 degrees, label every 30 degrees.
+       The compass rotates. So angle on screen = heading_value - current_heading - 90 deg (to put 0 at top).
+       Wait, no: top is current_heading. So if tick is 'h', its angle from top is (h - hdg).
+    */
     float hdg_floor = floorf(hdg / 5.0f) * 5.0f;
-    for (float h = hdg_floor - 100.0f; h <= hdg + 100.0f; h += 5.0f) {
+    for (float h = hdg_floor - 60.0f; h <= hdg + 60.0f; h += 5.0f) {
         float h_val = (float)norm_angle_360((double)h);
-        float delta = h - hdg;     /* degrees from current heading */
-        int x = tape_mid_x + (int)(delta * px_deg);
-        if (x < rect->x + 3 || x > rect->x + rect->w - 3) continue;
-
-        int abs_h = (int)h;
-        int is_major = (abs_h % 10 == 0);
-        int tick_h   = is_major ? tape_h * 2 / 3 : tape_h / 3;
-
+        float delta = h - hdg; /* angular distance from top center */
+        
+        /* Only draw if within visible arc (roughly +/- 45 deg) */
+        if (fabsf(delta) > 50.0f) continue;
+        
+        float angle_rad = (float)DEG2RAD(delta - 90.0f); /* -90 points straight UP */
+        
+        int abs_h = (int)h_val;
+        int is_major = (abs_h % 30 == 0);
+        
+        /* Make tick lines visibly longer */
+        float inner_r = is_major ? R - 20.0f : R - 10.0f;
+        
+        int x1 = cx + (int)(R * cosf(angle_rad));
+        int y1 = cy + (int)(R * sinf(angle_rad));
+        int x2 = cx + (int)(inner_r * cosf(angle_rad));
+        int y2 = cy + (int)(inner_r * sinf(angle_rad));
+        
         set_color(r, COL_HORIZON_WHITE);
-        SDL_RenderDrawLine(r, x, tape_y, x, tape_y + tick_h);
-
-        /* Label at every 30° */
-        if (abs_h % 30 == 0) {
-            int hdg_int = (int)h_val;
-            if (hdg_int == 360) hdg_int = 0;
-
-            char lbl[4];
-            if (hdg_int == 0)       snprintf(lbl, sizeof(lbl), "N");
-            else if (hdg_int == 90)  snprintf(lbl, sizeof(lbl), "E");
-            else if (hdg_int == 180) snprintf(lbl, sizeof(lbl), "S");
-            else if (hdg_int == 270) snprintf(lbl, sizeof(lbl), "W");
-            else                     snprintf(lbl, sizeof(lbl), "%02d", hdg_int / 10);
-
-            int is_cardinal = (hdg_int == 0 || hdg_int == 90 ||
-                               hdg_int == 180 || hdg_int == 270);
-            set_color(r, COL_HORIZON_WHITE);
-            font_draw_scaled_aligned(r, x, tape_y + tape_h - 2,
-                                     lbl, is_cardinal ? 0.55f : 0.48f,
-                                     FONT_REGULAR, FONT_ALIGN_CENTER);
+        SDL_RenderDrawLine(r, x1, y1, x2, y2);
+        
+        if (is_major) {
+            float text_r = R - 35.0f;
+            int tx = cx + (int)(text_r * cosf(angle_rad));
+            int ty = cy + (int)(text_r * sinf(angle_rad));
+            
+            char lbl[16];
+            if (abs_h == 0 || abs_h == 360) snprintf(lbl, sizeof(lbl), "N");
+            else if (abs_h == 90)  snprintf(lbl, sizeof(lbl), "E");
+            else if (abs_h == 180) snprintf(lbl, sizeof(lbl), "S");
+            else if (abs_h == 270) snprintf(lbl, sizeof(lbl), "W");
+            else                   snprintf(lbl, sizeof(lbl), "%02d", abs_h / 10);
+            
+            font_draw_scaled_aligned(r, tx, ty, lbl, 0.50f, FONT_REGULAR, FONT_ALIGN_CENTER);
         }
     }
 
-    /* ---- Current heading box (centre, on top of tape) ---- */
+    /* ---- Current Heading Pointer (hollow triangle pointing down OUTSIDE the compass) ---- */
     {
-        int box_w = 56;
-        int box_h = tape_h - 1;
-        set_color(r, COL_BACKGROUND);
-        SDL_Rect hdg_box = { tape_mid_x - box_w / 2, tape_y + 1,
-                              box_w, box_h - 1 };
-        SDL_RenderFillRect(r, &hdg_box);
         set_color(r, COL_HORIZON_WHITE);
-        SDL_RenderDrawRect(r, &hdg_box);
-
-        /* Triangle marker at top */
-        SDL_RenderDrawLine(r, tape_mid_x, tape_y + 1,
-                           tape_mid_x - 5, tape_y - 6);
-        SDL_RenderDrawLine(r, tape_mid_x, tape_y + 1,
-                           tape_mid_x + 5, tape_y - 6);
-        SDL_RenderDrawLine(r, tape_mid_x - 5, tape_y - 6,
-                           tape_mid_x + 5, tape_y - 6);
+        /* Base is above tape_y, tip is at tape_y (touching the arc from the outside) */
+        int tip_y = tape_y;
+        int base_y = tape_y - 15;
+        /* Draw hollow triangle pointing DOWN */
+        SDL_RenderDrawLine(r, cx, tip_y, cx - 10, base_y);
+        SDL_RenderDrawLine(r, cx - 10, base_y, cx + 10, base_y);
+        SDL_RenderDrawLine(r, cx + 10, base_y, cx, tip_y);
     }
 
-    /* Heading value in box */
-    {
-        char hdg_str[8];
-        snprintf(hdg_str, sizeof(hdg_str), "%03d", (int)hdg);
-        set_color(r, COL_HORIZON_WHITE);
-        draw_text_simple(r, tape_mid_x, tape_mid_y, hdg_str, 0.8f);
-    }
-
-    /* ---- "HDG" label ---- */
-    set_color(r, COL_LINE_GRAY);
-    draw_text_simple(r, tape_mid_x, tape_mid_y + 14, "HDG", 0.40f);
-
-    /* ---- AP heading bug (magenta diamond) ---- */
+    /* ---- AP Target Heading Bug (Magenta hollow notch) ---- */
     if (f->ap_hdg >= 0.0f) {
         float delta = (float)norm_angle_360((double)(f->ap_hdg - hdg));
         if (delta > 180.0f) delta -= 360.0f;
-        int bug_x = tape_mid_x + (int)(delta * px_deg);
-        if (bug_x > rect->x + 6 && bug_x < rect->x + rect->w - 6) {
+        
+        if (fabsf(delta) <= 55.0f) { /* only if visible on arc */
+            
+            /* Define a shape pointing to the outer edge of the arc */
+            /* We build the shape points centered at (0, R+4) and rotate */
+            Vec2f p1 = vec2f(0.0f, R);
+            Vec2f p2 = vec2f(-6.0f, R + 6.0f);
+            Vec2f p3 = vec2f(-6.0f, R + 14.0f);
+            Vec2f p4 = vec2f(6.0f, R + 14.0f);
+            Vec2f p5 = vec2f(6.0f, R + 6.0f);
+            
+            /* Rotate around the arc */
+            float rot = (float)DEG2RAD(delta);
+            p1 = vec2f_rotate(p1, rot);
+            p2 = vec2f_rotate(p2, rot);
+            p3 = vec2f_rotate(p3, rot);
+            p4 = vec2f_rotate(p4, rot);
+            p5 = vec2f_rotate(p5, rot);
+            
             set_color(r, COL_MAGENTA);
-            /* Diamond on top of tape border */
-            SDL_RenderDrawLine(r, bug_x, tape_y + 1, bug_x + 4, tape_y - 6);
-            SDL_RenderDrawLine(r, bug_x + 4, tape_y - 6, bug_x, tape_y - 12);
-            SDL_RenderDrawLine(r, bug_x, tape_y - 12, bug_x - 4, tape_y - 6);
-            SDL_RenderDrawLine(r, bug_x - 4, tape_y - 6, bug_x, tape_y + 1);
+            SDL_RenderDrawLine(r, cx + (int)p1.x, cy - (int)p1.y, cx + (int)p2.x, cy - (int)p2.y);
+            SDL_RenderDrawLine(r, cx + (int)p2.x, cy - (int)p2.y, cx + (int)p3.x, cy - (int)p3.y);
+            SDL_RenderDrawLine(r, cx + (int)p3.x, cy - (int)p3.y, cx + (int)p4.x, cy - (int)p4.y);
+            SDL_RenderDrawLine(r, cx + (int)p4.x, cy - (int)p4.y, cx + (int)p5.x, cy - (int)p5.y);
+            SDL_RenderDrawLine(r, cx + (int)p5.x, cy - (int)p5.y, cx + (int)p1.x, cy - (int)p1.y);
         }
+    }
+
+    /* ---- Heading Information Box (Left side: MAG / True value) ---- */
+    {
+        /* Target HDG on the left in magenta */
+        char tgt_str[8];
+        if (f->ap_hdg >= 0.0f) {
+            snprintf(tgt_str, sizeof(tgt_str), "%03d", (int)f->ap_hdg);
+        } else {
+            snprintf(tgt_str, sizeof(tgt_str), "---");
+        }
+        set_color(r, COL_MAGENTA);
+        font_draw_scaled_aligned(r, tape_mid_x - 80, tape_y + 15, tgt_str, 0.55f, FONT_REGULAR, FONT_ALIGN_RIGHT);
+
+        /* MAG label */
+        set_color(r, COL_TEXT_GREEN);
+        font_draw_scaled_aligned(r, tape_mid_x + 80, tape_y + 15, "MAG", 0.55f, FONT_REGULAR, FONT_ALIGN_LEFT);
+
+        /* Current HDG digital readout in center bottom of the tape */
+        char hdg_str[8];
+        snprintf(hdg_str, sizeof(hdg_str), "%03d", (int)norm_angle_360(hdg));
+        set_color(r, COL_HORIZON_WHITE);
+        font_draw_scaled_aligned(r, tape_mid_x, tape_y + 55, hdg_str, 0.70f, FONT_BOLD, FONT_ALIGN_CENTER);
     }
 }
 
@@ -752,19 +970,19 @@ static void draw_thrust_ref(SDL_Renderer* r, const SDL_Rect* rect,
     /* Two engine gauges side by side */
     int gauge_w = rect->w * 30 / 100;   /* Each gauge 30% of width */
     int gap     = rect->w * 8 / 100;    /* Gap between gauges */
-    int bar_h   = th * 55 / 100;        /* Bar height */
-    int bar_y   = ty + (th - bar_h) / 2;
 
     /* ---- Section background ---- */
+    /* Remove grey border as requested, but keep background for consistency */
     set_color(r, COL_BACKGROUND);
     SDL_Rect sec = { rect->x, ty, rect->w, th };
     SDL_RenderFillRect(r, &sec);
-    set_color(r, COL_LINE_GRAY);
-    SDL_RenderDrawLine(r, rect->x, ty + th - 1, rect->x + rect->w, ty + th - 1);
 
     for (int eng = 0; eng < 2; eng++) {
         int gx = (eng == 0) ? mid_x - gap / 2 - gauge_w
                             : mid_x + gap / 2;
+        int cx = gx + gauge_w / 2 + 10;
+        int cy = ty + th / 2;
+        float R = (float)th / 2.0f - 8.0f;
 
         float n1_pct = clamp_f(f->n1_pct[eng], 0.0f, 110.0f);
 
@@ -772,44 +990,123 @@ static void draw_thrust_ref(SDL_Renderer* r, const SDL_Rect* rect,
         char eng_lbl[8];
         snprintf(eng_lbl, sizeof(eng_lbl), "N1 %d", eng + 1);
         set_color(r, COL_TEXT_WHITE);
-        font_draw_scaled_aligned(r, gx + gauge_w / 2, ty + 2,
+        font_draw_scaled_aligned(r, gx + 20, ty + 10,
                                  eng_lbl, 0.42f, FONT_REGULAR, FONT_ALIGN_CENTER);
-
-        /* Bar background */
-        int bar_w = gauge_w - 10;
-        set_color(r, COL_N1_BG);
-        SDL_Rect bar_bg = { gx + 5, bar_y, bar_w, bar_h };
-        SDL_RenderFillRect(r, &bar_bg);
-        set_color(r, COL_LINE_GRAY);
-        SDL_RenderDrawRect(r, &bar_bg);
-
-        /* Filled portion */
-        int fill_w = (int)((float)bar_w * n1_pct / 110.0f);
-        if (fill_w > 0) {
-            if (n1_pct > 100.0f)
-                set_color(r, COL_TEXT_AMBER);
-            else
-                set_color(r, COL_N1_GREEN);
-            SDL_Rect fill = { gx + 5, bar_y + 1, fill_w, bar_h - 2 };
-            SDL_RenderFillRect(r, &fill);
-        }
-
-        /* Reference line at 100% */
-        int ref_x = gx + 5 + bar_w * 100 / 110;
-        set_color(r, COL_TEXT_RED);
-        SDL_RenderDrawLine(r, ref_x, bar_y - 1, ref_x, bar_y + bar_h + 1);
 
         /* Digital N1% */
         char n1_str[10];
-        snprintf(n1_str, sizeof(n1_str), "%.1f%%", (double)n1_pct);
+        snprintf(n1_str, sizeof(n1_str), "%.1f", (double)n1_pct);
         if (n1_pct > 100.0f) {
-            set_color(r, 0xFF, 0xC0, 0x00, 255);
+            set_color(r, COL_TEXT_AMBER);
         } else {
-            set_color(r, 0x00, 0xFF, 0x40, 255);
+            set_color(r, COL_N1_GREEN);
         }
-        font_draw_scaled_aligned(r, gx + gauge_w / 2, bar_y + bar_h + 2,
-                                 n1_str, 0.48f, FONT_BOLD, FONT_ALIGN_CENTER);
+        font_draw_scaled_aligned(r, gx + 20, cy,
+                                 n1_str, 0.55f, FONT_BOLD, FONT_ALIGN_CENTER);
+
+        /* ---- Draw Arc (135 deg to 360 deg) ---- */
+        set_color(r, COL_LINE_GRAY);
+        for (int i = 135; i <= 360; i++) {
+            float a1 = (float)i * (float)M_PI / 180.0f;
+            float a2 = (float)(i + 1) * (float)M_PI / 180.0f;
+            SDL_RenderDrawLine(r,
+                               cx + (int)(R * cosf(a1)), cy + (int)(R * sinf(a1)),
+                               cx + (int)(R * cosf(a2)), cy + (int)(R * sinf(a2)));
+        }
+
+        /* ---- Ticks every 20% (45 deg) and labels ---- */
+        set_color(r, COL_HORIZON_WHITE);
+        for (int pct = 0; pct <= 100; pct += 20) {
+            float angle_deg = 135.0f + ((float)pct / 100.0f) * 225.0f;
+            float rad = (float)DEG2RAD(angle_deg);
+            float inner_r = R - 6.0f;
+            SDL_RenderDrawLine(r,
+                               cx + (int)(R * cosf(rad)), cy + (int)(R * sinf(rad)),
+                               cx + (int)(inner_r * cosf(rad)), cy + (int)(inner_r * sinf(rad)));
+            
+            /* Draw tick labels (0, 2, 4, 6, 8, 10 for 0%, 20%, 40% etc.) */
+            char tick_lbl[4];
+            snprintf(tick_lbl, sizeof(tick_lbl), "%d", pct / 10);
+            float text_r = R + 10.0f;
+            int t_x = cx + (int)(text_r * cosf(rad));
+            int t_y = cy + (int)(text_r * sinf(rad));
+            font_draw_scaled_aligned(r, t_x, t_y, tick_lbl, 0.40f, FONT_REGULAR, FONT_ALIGN_CENTER);
+        }
+
+        /* ---- Pointer ---- */
+        float ptr_angle_deg = 135.0f + (n1_pct / 100.0f) * 225.0f;
+        if (ptr_angle_deg > 360.0f) ptr_angle_deg = 360.0f;
+        float ptr_rad = (float)DEG2RAD(ptr_angle_deg);
+        
+        set_color(r, COL_HORIZON_WHITE);
+        /* Draw a thicker line pointer from center to edge */
+        draw_thick_line(r, cx, cy, cx + (int)(R * cosf(ptr_rad)), cy + (int)(R * sinf(ptr_rad)), 3);
     }
+}
+
+/* =========================================================================
+ *  Pitch Rate Dial — top right corner (in thrust ref area)
+ * ========================================================================= */
+
+static void draw_pitch_rate_dial(SDL_Renderer* r, const SDL_Rect* rect,
+                                 const PFDLayout* lay, float pitch_rate)
+{
+    int ty = lay->thrust_y;
+    int th = lay->thrust_h;
+    
+    /* Place it on the far right of the thrust area */
+    int cx = rect->x + rect->w - (rect->w * 10 / 100);
+    int cy = ty + th / 2 + 5;
+    float R = (float)th / 2.0f - 8.0f;
+    
+    /* Clamp pitch rate to [-60, 60] */
+    float pr = clamp_f(pitch_rate, -60.0f, 60.0f);
+    
+    /* Label */
+    set_color(r, COL_TEXT_WHITE);
+    font_draw_scaled_aligned(r, cx, ty + 10, "PITCH RATE", 0.40f, FONT_REGULAR, FONT_ALIGN_CENTER);
+
+    /* Draw arc from 45 to 315 degrees (0 is at 180 deg / left) */
+    set_color(r, COL_LINE_GRAY);
+    for (int i = 45; i <= 315; i++) {
+        float a1 = (float)i * (float)M_PI / 180.0f;
+        float a2 = (float)(i + 1) * (float)M_PI / 180.0f;
+        SDL_RenderDrawLine(r,
+                           cx + (int)(R * cosf(a1)), cy + (int)(R * sinf(a1)),
+                           cx + (int)(R * cosf(a2)), cy + (int)(R * sinf(a2)));
+    }
+
+    /* Draw ticks */
+    set_color(r, COL_HORIZON_WHITE);
+    for (int rate = -60; rate <= 60; rate += 20) {
+        float angle_deg = 180.0f + ((float)rate / 60.0f) * 135.0f;
+        float rad = (float)DEG2RAD(angle_deg);
+        float inner_r = R - 5.0f;
+        SDL_RenderDrawLine(r,
+                           cx + (int)(R * cosf(rad)), cy + (int)(R * sinf(rad)),
+                           cx + (int)(inner_r * cosf(rad)), cy + (int)(inner_r * sinf(rad)));
+                           
+        if (rate == 0 || rate == 60 || rate == -60) {
+            char lbl[8];
+            snprintf(lbl, sizeof(lbl), "%d", rate);
+            float text_r = R + 10.0f;
+            int t_x = cx + (int)(text_r * cosf(rad));
+            int t_y = cy + (int)(text_r * sinf(rad));
+            font_draw_scaled_aligned(r, t_x, t_y, lbl, 0.35f, FONT_REGULAR, FONT_ALIGN_CENTER);
+        }
+    }
+
+    /* Pointer */
+    float ptr_angle_deg = 180.0f + (pr / 60.0f) * 135.0f;
+    float ptr_rad = (float)DEG2RAD(ptr_angle_deg);
+    set_color(r, COL_CYAN);
+    draw_thick_line(r, cx, cy, cx + (int)(R * cosf(ptr_rad)), cy + (int)(R * sinf(ptr_rad)), 2);
+    
+    /* Digital readout */
+    char pr_str[10];
+    snprintf(pr_str, sizeof(pr_str), "%.1f", (double)pr);
+    set_color(r, COL_HORIZON_WHITE);
+    font_draw_scaled_aligned(r, cx, cy + (int)R + 10, pr_str, 0.45f, FONT_BOLD, FONT_ALIGN_CENTER);
 }
 
 /* =========================================================================
@@ -832,8 +1129,8 @@ static void draw_fma(SDL_Renderer* r, const SDL_Rect* rect,
     set_color(r, COL_LINE_GRAY);
     SDL_RenderDrawLine(r, rect->x, fy + fh - 1, rect->x + rect->w, fy + fh - 1);
 
-    /* Column layout — 4 equal columns */
-    int col_w = rect->w / 4;
+    /* Column layout — 3 equal columns */
+    int col_w = rect->w / 3;
 
     /* === Column 1: Auto-throttle === */
     {
@@ -847,6 +1144,8 @@ static void draw_fma(SDL_Renderer* r, const SDL_Rect* rect,
             set_color(r, COL_FMA_BOX_BG);
             SDL_Rect box = { bx, by, bw, bh };
             SDL_RenderFillRect(r, &box);
+            set_color(r, COL_BOX_BORDER);
+            SDL_RenderDrawRect(r, &box);
             set_color(r, COL_FMA_ACTIVE);
         } else {
             set_color(r, COL_FMA_DIM);
@@ -867,8 +1166,10 @@ static void draw_fma(SDL_Renderer* r, const SDL_Rect* rect,
             set_color(r, COL_FMA_BOX_BG);
             SDL_Rect box = { bx, by, bw, bh };
             SDL_RenderFillRect(r, &box);
+            set_color(r, COL_BOX_BORDER);
+            SDL_RenderDrawRect(r, &box);
             set_color(r, COL_MAGENTA);
-            font_draw_scaled_aligned(r, cx, mid_y, "HDG", 0.55f,
+            font_draw_scaled_aligned(r, cx, mid_y, "CWSR", 0.55f,
                                      FONT_REGULAR, FONT_ALIGN_CENTER);
         } else {
             set_color(r, COL_FMA_DIM);
@@ -885,42 +1186,14 @@ static void draw_fma(SDL_Renderer* r, const SDL_Rect* rect,
         int bh = fh - 6;
         int by = fy + 3;
 
-        const char* pitch_mode = "---";
-        if (f->ap_engaged) {
-            if (f->ap_vs > 100.0f || f->ap_vs < -100.0f)
-                pitch_mode = "V/S";
-            else if (f->ap_alt > 0.0f)
-                pitch_mode = "ALT";
-            else
-                pitch_mode = "ALT";
-        }
-
         if (f->ap_engaged) {
             set_color(r, COL_FMA_BOX_BG);
             SDL_Rect box = { bx, by, bw, bh };
             SDL_RenderFillRect(r, &box);
+            set_color(r, COL_BOX_BORDER);
+            SDL_RenderDrawRect(r, &box);
             set_color(r, COL_MAGENTA);
-        } else {
-            set_color(r, COL_FMA_DIM);
-        }
-        font_draw_scaled_aligned(r, cx, mid_y, pitch_mode, 0.55f,
-                                 FONT_REGULAR, FONT_ALIGN_CENTER);
-    }
-
-    /* === Column 4: AP status === */
-    {
-        int cx = rect->x + col_w * 3 + col_w / 2;
-        int bw = col_w - 16;
-        int bx = cx - bw / 2;
-        int bh = fh - 6;
-        int by = fy + 3;
-
-        if (f->ap_engaged) {
-            set_color(r, COL_FMA_BOX_BG);
-            SDL_Rect box = { bx, by, bw, bh };
-            SDL_RenderFillRect(r, &box);
-            set_color(r, COL_FMA_ACTIVE);
-            font_draw_scaled_aligned(r, cx, mid_y, "CMD", 0.55f,
+            font_draw_scaled_aligned(r, cx, mid_y, "CWSP", 0.55f,
                                      FONT_REGULAR, FONT_ALIGN_CENTER);
         } else {
             set_color(r, COL_FMA_DIM);
@@ -984,7 +1257,27 @@ static void pfd_on_update(Instrument* self, const FlightData* fd, float dt)
     p->smooth_ias   = exp_smooth(p->smooth_ias,   p->fd.ias_kts,         alpha);
     p->smooth_alt   = exp_smooth(p->smooth_alt,   p->fd.altitude_ft,     alpha);
     p->smooth_hdg   = exp_smooth_angle(p->smooth_hdg,   p->fd.heading_true_deg, alpha);
-    p->smooth_vs    = exp_smooth(p->smooth_vs,    p->fd.vs_fpm,          alpha);
+    
+    /* Robust VSI calculation from altitude to avoid X-Plane version/unit mapping issues */
+    if (p->last_alt_valid && dt > 0.001) {
+        float inst_vs = (p->fd.altitude_ft - p->last_alt_for_vsi) / (float)dt * 60.0f;
+        /* Smooth the calculated VSI slightly more to avoid jitter */
+        float vs_alpha = (float)(1.0 - exp(-dt * 2.0));
+        p->smooth_vs = exp_smooth(p->smooth_vs, inst_vs, vs_alpha);
+    }
+    p->last_alt_for_vsi = p->fd.altitude_ft;
+    p->last_alt_valid = 1;
+
+    /* Robust Pitch Rate calculation from pitch_deg */
+    if (p->last_pitch_valid && dt > 0.001) {
+        float inst_pitch_rate = (p->fd.pitch_deg - p->last_pitch_for_rate) / (float)dt;
+        /* Smooth the calculated pitch rate */
+        float pr_alpha = (float)(1.0 - exp(-dt * 4.0));
+        p->smooth_pitch_rate = exp_smooth(p->smooth_pitch_rate, inst_pitch_rate, pr_alpha);
+    }
+    p->last_pitch_for_rate = p->fd.pitch_deg;
+    p->last_pitch_valid = 1;
+
     p->smooth_n1[0] = exp_smooth(p->smooth_n1[0], p->fd.n1_pct[0],       alpha);
     p->smooth_n1[1] = exp_smooth(p->smooth_n1[1], p->fd.n1_pct[1],       alpha);
 }
@@ -1019,10 +1312,13 @@ static void pfd_on_render(Instrument* self, SDL_Renderer* renderer)
     set_color(renderer, COL_BACKGROUND);
     SDL_RenderFillRect(renderer, rect);
 
-    /* ---- Draw all PFD components (top → bottom, left → right) ---- */
+    /* ---- Draw Attitude Indicator FIRST ---- */
+    draw_attitude_indicator(renderer, &lay, &f);
+
+    /* ---- Draw remaining PFD components (top → bottom, left → right) ---- */
     draw_fma(renderer, rect, &lay, &f);
     draw_thrust_ref(renderer, rect, &lay, &f);
-    draw_attitude_indicator(renderer, &lay, &f);
+    draw_pitch_rate_dial(renderer, rect, &lay, p->smooth_pitch_rate);
     draw_airspeed_tape(renderer, &lay, &f);
     draw_altitude_tape(renderer, &lay, &f);
     draw_vsi(renderer, &lay, &f);

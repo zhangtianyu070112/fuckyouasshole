@@ -66,14 +66,14 @@ static struct {
  * @brief Build a cache key from rendering parameters.
  * Format: "F:SS:CCCCCCCC:text"  (F=font_id, SS=pt_size, C=RGBA)
  */
-static void make_cache_key(char* buf, size_t bufsz,
+static void make_cache_key(char* buf, size_t bufsz, SDL_Renderer* r,
                            FontID font_id, int pt_size,
                            uint8_t R, uint8_t G, uint8_t B, uint8_t A,
                            const char* text)
 {
     uint32_t color = ((uint32_t)R << 24) | ((uint32_t)G << 16)
                    | ((uint32_t)B << 8)  |  (uint32_t)A;
-    snprintf(buf, bufsz, "%d:%d:%08X:%s", (int)font_id, pt_size, color, text);
+    snprintf(buf, bufsz, "%p:%d:%d:%08X:%s", (void*)r, (int)font_id, pt_size, color, text);
 }
 
 /**
@@ -267,7 +267,7 @@ void font_draw_aligned(SDL_Renderer* r, int x, int y, const char* text,
 
     /* Build cache key (alignment doesn't affect texture, only placement) */
     char key[512];
-    make_cache_key(key, sizeof(key), font_id, pt_size, R, G, B, A, text);
+    make_cache_key(key, sizeof(key), r, font_id, pt_size, R, G, B, A, text);
 
     /* Try cache */
     CacheEntry* cached = cache_find(key);

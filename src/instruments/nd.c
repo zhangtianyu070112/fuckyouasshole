@@ -45,7 +45,7 @@ typedef struct {
     int    show_route;     /* 1 = draw active flight plan route */
 
     /* Ground track computation (from GPS position delta) */
-    float  prev_lat, prev_lon;     /* Previous frame position */
+    double prev_lat, prev_lon;     /* Previous frame position */
     float  track_true_deg;         /* Computed true track (°) */
     float  track_mag_deg;          /* Computed magnetic track (°) */
     int    track_valid;            /* 1 = valid track from position movement */
@@ -97,38 +97,35 @@ static int geo_to_screen(GeoPos ac, float hdg, float px_nm,
 static void draw_nd_top_bar(SDL_Renderer* r, const SDL_Rect* rect, NDData* nd,
                              const FlightDataValues* f)
 {
-    int x0 = rect->x + 8;
     int y0 = rect->y + 4;
 
-    /* ---- Semi-transparent background strip ---- */
-    set_col(r, 0x08, 0x08, 0x10, 200);
-    SDL_Rect bar = { rect->x, rect->y, rect->w, 38 };
-    SDL_RenderFillRect(r, &bar);
+    /* === Center: TRK | MAG (Above radar triangle) === */
+    int cx = rect->x + rect->w * 56 / 100;
+    int cy = rect->y + rect->h * 48 / 100;
+    int radius = (int)((float)(rect->h < rect->w ? rect->h : rect->w) * 0.38f);
+    if (radius < 40) radius = 40;
+    
+    int top_y = cy - radius - 40; /* Positioned right above the triangle base */
 
-    /* Thin separator line below the bar */
-    set_col(r, COL_GRAY);
-    SDL_RenderDrawLine(r, rect->x, rect->y + 38, rect->x + rect->w, rect->y + 38);
-
-    /* === Left side: TRK | MAG === */
     float track = nd->track_valid ? nd->track_mag_deg : f->heading_mag_deg;
     /* When GS < 30 kt (near-stationary), track is unreliable — fall back to heading */
     if (f->gs_kts < 30.0f) {
         track = f->heading_mag_deg;
     }
 
-    /* "TRK" label in small cyan */
-    set_col(r, COL_CYAN);
-    draw_text_left(r, x0, y0 + 2, "TRK", 0.5f);
-
     /* Track value in large white */
     char trk_str[8];
-    snprintf(trk_str, sizeof(trk_str), "%.0f", (double)track);
+    snprintf(trk_str, sizeof(trk_str), "%03.0f", (double)track);
     set_col(r, COL_WHITE);
-    draw_text_left(r, x0 + 26, y0 + 2, trk_str, 0.75f);
+    font_draw_scaled_aligned(r, cx, top_y, trk_str, 0.75f, FONT_REGULAR, FONT_ALIGN_CENTER);
 
-    /* Degree symbol + "MAG" indicator in green */
+    /* "TRK" label in small cyan */
+    set_col(r, COL_CYAN);
+    font_draw_scaled_aligned(r, cx - 35, top_y + 4, "TRK", 0.50f, FONT_REGULAR, FONT_ALIGN_RIGHT);
+
+    /* "MAG" indicator in green */
     set_col(r, COL_GREEN);
-    draw_text_left(r, x0 + 60, y0 + 6, "MAG", 0.4f);
+    font_draw_scaled_aligned(r, cx + 35, top_y + 4, "MAG", 0.40f, FONT_REGULAR, FONT_ALIGN_LEFT);
 
     /* === Right side: Active waypoint info (目标航路) === */
     if (nd->fmc) {
@@ -191,7 +188,7 @@ static void draw_nd_top_bar(SDL_Renderer* r, const SDL_Rect* rect, NDData* nd,
 static void draw_compass_rose(SDL_Renderer* r, const SDL_Rect* rect, NDData* nd,
                               const FlightDataValues* f)
 {
-    int cx   = rect->x + rect->w * 64 / 100;  /* Offset left for data panel */
+    int cx   = rect->x + rect->w * 56 / 100;  /* Offset left slightly */
     int cy   = rect->y + rect->h * 48 / 100;
     int radius = (int)((float)(rect->h < rect->w ? rect->h : rect->w) * 0.38f);
     if (radius < 40) radius = 40;
@@ -289,6 +286,12 @@ static void draw_compass_rose(SDL_Renderer* r, const SDL_Rect* rect, NDData* nd,
     SDL_RenderDrawLine(r, cx - 5, cy + 6, cx + 5, cy + 6);
     /* Dot */
     draw_filled_circle(r, cx, cy, 3);
+
+    /* --- Top Heading Indicator (Fixed lubber line/triangle) --- */
+    set_col(r, COL_WHITE);
+    SDL_RenderDrawLine(r, cx, cy - radius, cx - 8, cy - radius - 12);
+    SDL_RenderDrawLine(r, cx, cy - radius, cx + 8, cy - radius - 12);
+    SDL_RenderDrawLine(r, cx - 8, cy - radius - 12, cx + 8, cy - radius - 12);
 
     /* --- Track line (if moving) --- */
     if (f->gs_kts > 30.0f) {
@@ -391,15 +394,19 @@ static void draw_compass_rose(SDL_Renderer* r, const SDL_Rect* rect, NDData* nd,
         if (fp->waypoint_count >= 2) {
             for (int i = 0; i < fp->waypoint_count - 1; i++) {
                 int x1, y1, x2, y2;
-                int v1 = geo_to_screen(ac, hdg, px_nm, cx, cy,
+                geo_to_screen(ac, hdg, px_nm, cx, cy,
                                        fp->waypoints[i].pos,
                                        &x1, &y1, (float)nd->range_nm, radius);
-                int v2 = geo_to_screen(ac, hdg, px_nm, cx, cy,
+                geo_to_screen(ac, hdg, px_nm, cx, cy,
                                        fp->waypoints[i + 1].pos,
                                        &x2, &y2, (float)nd->range_nm, radius);
                 /* Active leg: magenta, others: green */
                 int is_active = (i == fp->active_waypoint_index - 1);
-                set_col(r, is_active ? COL_MAGENTA : COL_GREEN);
+                if (is_active) {
+                    set_col(r, COL_MAGENTA);
+                } else {
+                    set_col(r, COL_GREEN);
+                }
                 int lw = is_active ? 3 : 2;
                 draw_thick_line(r, x1, y1, x2, y2, lw);
             }
@@ -411,7 +418,11 @@ static void draw_compass_rose(SDL_Renderer* r, const SDL_Rect* rect, NDData* nd,
                           fp->waypoints[i].pos,
                           &sx, &sy, (float)nd->range_nm, radius);
             int is_active = (i == fp->active_waypoint_index);
-            set_col(r, is_active ? COL_MAGENTA : COL_WHITE);
+            if (is_active) {
+                set_col(r, COL_MAGENTA);
+            } else {
+                set_col(r, COL_WHITE);
+            }
             draw_filled_circle(r, sx, sy, is_active ? 4 : 3);
         }
     }
@@ -424,103 +435,83 @@ static void draw_compass_rose(SDL_Renderer* r, const SDL_Rect* rect, NDData* nd,
 static void draw_nd_data_panel(SDL_Renderer* r, const SDL_Rect* rect,
                                const FlightDataValues* f, NDData* nd)
 {
-    int x0 = rect->x + 8;
-    int y  = rect->y + 48;   /* Start below the 38px top bar */
-    int line_h = 22;
+    int x0 = rect->x + 15;
+    int y  = rect->y + 55;   /* Start below the 38px top bar */
 
+    /* ==== Highlighted Data: GS, TAS, WIND ==== */
+    
     /* Ground speed */
-    set_col(r, COL_GREEN);
-    draw_text_left(r, x0, y, "GS", 0.6f);
+    set_col(r, COL_WHITE);
+    draw_text_left(r, x0, y, "GS", 0.60f);
     char gs_str[16];
-    snprintf(gs_str, sizeof(gs_str), "%.0f kt", (double)f->gs_kts);
-    draw_text_left(r, x0 + 24, y, gs_str, 0.7f);
-    y += line_h;
+    snprintf(gs_str, sizeof(gs_str), "%.0f", (double)f->gs_kts);
+    set_col(r, COL_GREEN);
+    draw_text_left(r, x0 + 45, y - 2, gs_str, 0.80f);
+    y += 28;
 
     /* True airspeed */
-    set_col(r, COL_GREEN);
-    draw_text_left(r, x0, y, "TAS", 0.6f);
+    set_col(r, COL_WHITE);
+    draw_text_left(r, x0, y, "TAS", 0.60f);
     char tas_str[16];
-    snprintf(tas_str, sizeof(tas_str), "%.0f kt", (double)f->tas_kts);
-    draw_text_left(r, x0 + 24, y, tas_str, 0.7f);
-    y += line_h;
+    snprintf(tas_str, sizeof(tas_str), "%.0f", (double)f->tas_kts);
+    set_col(r, COL_GREEN);
+    draw_text_left(r, x0 + 45, y - 2, tas_str, 0.80f);
+    y += 32;
 
-    /* Wind */
-    set_col(r, COL_AMBER);
+    /* Wind Data */
     char wind_str[32];
-    snprintf(wind_str, sizeof(wind_str), "%.0f°/%.0f kt",
+    snprintf(wind_str, sizeof(wind_str), "%03.0f / %02.0f KT",
              (double)f->wind_dir_deg, (double)f->wind_speed_kts);
-    draw_text_left(r, x0, y, wind_str, 0.6f);
-    y += line_h;
-
-    /* OAT */
     set_col(r, COL_CYAN);
+    draw_text_left(r, x0, y, wind_str, 0.65f);
+    y += 24;
+
+    /* OAT (smaller) */
+    set_col(r, COL_WHITE);
     char oat_str[16];
-    snprintf(oat_str, sizeof(oat_str), "OAT %+.0f°C", (double)f->oat_c);
-    draw_text_left(r, x0, y, oat_str, 0.55f);
-    y += line_h;
+    snprintf(oat_str, sizeof(oat_str), "OAT %+.0f C", (double)f->oat_c);
+    draw_text_left(r, x0, y, oat_str, 0.50f);
 
-    /* COM1 */
+    /* ==== Right-side NAV data panel ==== */
     {
-        char com1_str[20];
-        snprintf(com1_str, sizeof(com1_str), "COM1 %06.3f",
-                 (double)(f->com1_freq > 100.0f ? f->com1_freq : 122.800f));
-        set_col(r, COL_GREEN);
-        draw_text_left(r, x0, y, com1_str, 0.55f);
-        y += (int)((float)line_h * 0.75f);
-    }
+        int rx = rect->x + rect->w - 15;
+        int ry = rect->y + 55;
 
-    /* COM2 */
-    {
-        char com2_str[20];
-        snprintf(com2_str, sizeof(com2_str), "COM2 %06.3f",
-                 (double)(f->com2_freq > 100.0f ? f->com2_freq : 121.500f));
-        set_col(r, COL_GREEN);
-        draw_text_left(r, x0, y, com2_str, 0.55f);
-    }
-
-    /* Right-side NAV data panel */
-    {
-        int rx = rect->x + rect->w * 86 / 100;
-        int ry = rect->y + 48;   /* Start below the 38px top bar */
+        int nav_line_h = 22;
 
         /* NAV1 */
-        {
-            char nav1_str[32];
-            snprintf(nav1_str, sizeof(nav1_str), "NAV1 %06.2f",
-                     (double)(f->nav1_freq > 100.0f ? f->nav1_freq : 110.90f));
-            set_col(r, COL_CYAN);
-            font_draw_scaled_aligned(r, rx, ry, nav1_str, 0.55f, FONT_REGULAR, FONT_ALIGN_RIGHT);
-            ry += line_h;
-        }
+        char nav1_str[32];
+        snprintf(nav1_str, sizeof(nav1_str), "VOR1  %06.2f",
+                 (double)(f->nav1_freq > 100.0f ? f->nav1_freq : 110.90f));
+        set_col(r, COL_CYAN);
+        font_draw_scaled_aligned(r, rx, ry, nav1_str, 0.50f, FONT_REGULAR, FONT_ALIGN_RIGHT);
+        ry += nav_line_h;
 
         /* NAV2 */
-        {
-            char nav2_str[32];
-            snprintf(nav2_str, sizeof(nav2_str), "NAV2 %06.2f",
-                     (double)(f->nav2_freq > 100.0f ? f->nav2_freq : 113.70f));
-            set_col(r, COL_CYAN);
-            font_draw_scaled_aligned(r, rx, ry, nav2_str, 0.55f, FONT_REGULAR, FONT_ALIGN_RIGHT);
-            ry += line_h;
-        }
+        char nav2_str[32];
+        snprintf(nav2_str, sizeof(nav2_str), "VOR2  %06.2f",
+                 (double)(f->nav2_freq > 100.0f ? f->nav2_freq : 113.70f));
+        set_col(r, COL_CYAN);
+        font_draw_scaled_aligned(r, rx, ry, nav2_str, 0.50f, FONT_REGULAR, FONT_ALIGN_RIGHT);
+        ry += nav_line_h;
 
         /* DME */
-        {
-            char dme_str[32];
-            snprintf(dme_str, sizeof(dme_str), "DME %.1f NM",
-                     (double)(f->dme_dist_nm > 0.0f ? f->dme_dist_nm : 0.0f));
-            set_col(r, COL_WHITE);
-            font_draw_scaled_aligned(r, rx, ry, dme_str, 0.55f, FONT_REGULAR, FONT_ALIGN_RIGHT);
-        }
+        char dme_str[32];
+        snprintf(dme_str, sizeof(dme_str), "DME  %.1f NM",
+                 (double)(f->dme_dist_nm > 0.0f ? f->dme_dist_nm : 0.0f));
+        set_col(r, COL_GREEN);
+        font_draw_scaled_aligned(r, rx, ry, dme_str, 0.50f, FONT_REGULAR, FONT_ALIGN_RIGHT);
     }
 
+    /* ==== Bottom Information ==== */
     /* Range indicator (bottom-left) */
-    y = rect->y + rect->h - 22;
+    int by = rect->y + rect->h - 25;
     set_col(r, COL_CYAN);
     char rng_str[16];
     snprintf(rng_str, sizeof(rng_str), "RNG %d NM", nd->range_nm);
-    draw_text_left(r, x0, y, rng_str, 0.6f);
+    draw_text_left(r, x0, by, rng_str, 0.6f);
 
-    /* XPDR (bottom-left, next to RNG) */
+    /* XPDR (bottom-right) */
     {
         const char* mode_str[] = { "OFF", "STBY", "ON", "ALT" };
         int mode = (f->xpdr_mode >= 0 && f->xpdr_mode <= 3) ? f->xpdr_mode : 3;
@@ -528,7 +519,7 @@ static void draw_nd_data_panel(SDL_Renderer* r, const SDL_Rect* rect,
         snprintf(xpdr_str, sizeof(xpdr_str), "XPDR %04d %s",
                  (f->xpdr_code > 0 ? f->xpdr_code : 1200), mode_str[mode]);
         set_col(r, COL_GREEN);
-        draw_text_left(r, x0 + 100, y, xpdr_str, 0.5f);
+        font_draw_scaled_aligned(r, rect->x + rect->w - 15, by, xpdr_str, 0.55f, FONT_REGULAR, FONT_ALIGN_RIGHT);
     }
 }
 
@@ -556,7 +547,7 @@ static void nd_on_update(Instrument* self, const FlightData* fd, float dt)
     nd->smooth_hdg = exp_smooth_angle(nd->smooth_hdg, nd->fd.heading_true_deg, 0.12f);
 
     /* --- Compute ground track from GPS position delta --- */
-    if (fabs((double)nd->prev_lat) > 0.001 || fabs((double)nd->prev_lon) > 0.001) {
+    if (fabs(nd->prev_lat) > 0.001 || fabs(nd->prev_lon) > 0.001) {
         GeoPos prev = { nd->prev_lat, nd->prev_lon };
         GeoPos curr = { nd->fd.lat_deg, nd->fd.lon_deg };
         double dist = geo_distance_nm(prev, curr);
@@ -570,8 +561,8 @@ static void nd_on_update(Instrument* self, const FlightData* fd, float dt)
             nd->track_valid = 1;
         }
     }
-    nd->prev_lat = (float)nd->fd.lat_deg;
-    nd->prev_lon = (float)nd->fd.lon_deg;
+    nd->prev_lat = nd->fd.lat_deg;
+    nd->prev_lon = nd->fd.lon_deg;
 }
 
 static void nd_on_render(Instrument* self, SDL_Renderer* renderer)
