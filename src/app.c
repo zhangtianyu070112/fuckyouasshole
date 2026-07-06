@@ -173,7 +173,7 @@ static void layout_instruments(App* app)
     /* LEFT FMC */
     orig_rects[4] = (SDL_Rect){2766, 1806, 643, 992};
     /* EICAS 2 (Lower) */
-    orig_rects[5] = (SDL_Rect){3545, 1841, 830, 779};
+    orig_rects[5] = (SDL_Rect){3505, 1891, 830, 779};
     /* FO ND */
     orig_rects[6] = (SDL_Rect){4745, 906, 830, 778};
     /* RIGHT FMC */
