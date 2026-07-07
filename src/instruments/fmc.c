@@ -482,6 +482,100 @@ static void build_radio_page(FMCData* d)
     for (int i = 0; i < 12; i++) d->display[i][24] = '\0';
 }
 
+static void build_dep_arr_page(FMCData* d)
+{
+    memset(d->display, ' ', sizeof(d->display));
+    FlightPlan* fp = d->fmc ? &d->fmc->flight_plan : NULL;
+
+    snprintf(d->display[0], 25, " DEP/ARR INDEX         ");
+    
+    snprintf(d->display[1], 25, " <DEP              ARR> ");
+    snprintf(d->display[2], 25, " %-8s          %-8s ", 
+        (fp && fp->departure.icao[0]) ? fp->departure.icao : "----",
+        (fp && fp->arrival.icao[0]) ? fp->arrival.icao : "----");
+    snprintf(d->display[3], 25, "                        ");
+
+    /* Show current SID/STAR if any */
+    snprintf(d->display[4], 25, " SID               STAR ");
+    snprintf(d->display[5], 25, " %-8s          %-8s ", 
+        (fp && fp->sid.name[0]) ? fp->sid.name : "----",
+        (fp && fp->star.name[0]) ? fp->star.name : "----");
+
+    snprintf(d->display[6], 25, " RUNWAY          RUNWAY ");
+    snprintf(d->display[7], 25, " %-8s          %-8s ", 
+        (fp && fp->sid.runway[0]) ? fp->sid.runway : "----",
+        (fp && fp->star.runway[0]) ? fp->star.runway : "----");
+
+    snprintf(d->display[11], 25, " <INDEX                ");
+
+    for (int i = 0; i < 12; i++) d->display[i][24] = '\0';
+}
+
+static void build_clb_page(FMCData* d)
+{
+    memset(d->display, ' ', sizeof(d->display));
+    FlightPlan* fp = d->fmc ? &d->fmc->flight_plan : NULL;
+
+    snprintf(d->display[0], 25, " ACT ECON CLB          ");
+    snprintf(d->display[1], 25, " CRZ ALT               ");
+    snprintf(d->display[2], 25, " FL%03d                 ", fp ? (int)(fp->cruise_altitude_ft / 100) : 350);
+    snprintf(d->display[3], 25, " TGT SPD               ");
+    snprintf(d->display[4], 25, " .%02d/%03d               ", 
+             fp ? (int)(fp->climb_tgt_spd_mach * 100) : 78,
+             fp ? (int)fp->climb_tgt_spd_kts : 280);
+    
+    snprintf(d->display[5], 25, " SPD REST              ");
+    snprintf(d->display[6], 25, " %03d/%05d             ", 
+             fp ? (int)fp->climb_spd_rest_kts : 250,
+             fp ? (int)fp->climb_spd_rest_alt_ft : 10000);
+
+    snprintf(d->display[11], 25, " <CLB                  ");
+
+    for (int i = 0; i < 12; i++) d->display[i][24] = '\0';
+}
+
+static void build_crz_page(FMCData* d)
+{
+    memset(d->display, ' ', sizeof(d->display));
+    FlightPlan* fp = d->fmc ? &d->fmc->flight_plan : NULL;
+
+    snprintf(d->display[0], 25, " ACT ECON CRZ          ");
+    snprintf(d->display[1], 25, " CRZ ALT               ");
+    snprintf(d->display[2], 25, " FL%03d                 ", fp ? (int)(fp->cruise_altitude_ft / 100) : 350);
+    snprintf(d->display[3], 25, " TGT SPD               ");
+    snprintf(d->display[4], 25, " M.%02d                  ", fp ? (int)(fp->cruise_tgt_spd_mach * 100) : 78);
+    
+    snprintf(d->display[5], 25, " OPT/MAX               ");
+    snprintf(d->display[6], 25, " FL360/FL390           ");
+
+    snprintf(d->display[11], 25, " <CRZ                  ");
+
+    for (int i = 0; i < 12; i++) d->display[i][24] = '\0';
+}
+
+static void build_des_page(FMCData* d)
+{
+    memset(d->display, ' ', sizeof(d->display));
+    FlightPlan* fp = d->fmc ? &d->fmc->flight_plan : NULL;
+
+    snprintf(d->display[0], 25, " ACT ECON DES          ");
+    snprintf(d->display[1], 25, " E/D ALT               ");
+    snprintf(d->display[2], 25, " %05d                 ", fp ? (int)fp->descent_ed_alt_ft : 10000);
+    snprintf(d->display[3], 25, " TGT SPD               ");
+    snprintf(d->display[4], 25, " .%02d/%03d               ", 
+             fp ? (int)(fp->descent_tgt_spd_mach * 100) : 78,
+             fp ? (int)fp->descent_tgt_spd_kts : 280);
+    
+    snprintf(d->display[5], 25, " SPD REST              ");
+    snprintf(d->display[6], 25, " %03d/%05d             ", 
+             fp ? (int)fp->descent_spd_rest_kts : 250,
+             fp ? (int)fp->descent_spd_rest_alt_ft : 10000);
+
+    snprintf(d->display[11], 25, " <DES                  ");
+
+    for (int i = 0; i < 12; i++) d->display[i][24] = '\0';
+}
+
 static void build_page(FMCData* d)
 {
     switch (d->current_page) {
@@ -491,6 +585,10 @@ static void build_page(FMCData* d)
         case 3: build_perf_page(d);  break;
         case 4: build_prog_page(d);  break;
         case 5: build_radio_page(d); break;
+        case 6: build_dep_arr_page(d); break;
+        case 7: build_clb_page(d); break;
+        case 8: build_crz_page(d); break;
+        case 9: build_des_page(d); break;
         default: break;
     }
 }
@@ -652,6 +750,13 @@ static void exec_scratchpad(FMCData* d)
         }
         break;
 
+    case 6: /* DEP ARR */
+    case 7: /* CLB */
+    case 8: /* CRZ */
+    case 9: /* DES */
+        set_message(d, "USE LSK TO SET");
+        break;
+
     default:
         set_message(d, "ENTER COMMAND");
         break;
@@ -783,6 +888,140 @@ static void handle_lsk(FMCData* d, int side, int line)
             d->current_page = 3; /* back to PERF */
         }
         break;
+
+    case 6: /* DEP ARR */
+        if (side == 0) {
+            if (line == 2) { /* LSK L3: SID */
+                if (d->scratchpad[0] && fp) {
+                    for (char* p = d->scratchpad; *p; p++)
+                        *p = (char)toupper((unsigned char)*p);
+                    strncpy(fp->sid.name, d->scratchpad, sizeof(fp->sid.name) - 1);
+                    set_message(d, "SID SET");
+                    memset(d->scratchpad, 0, sizeof(d->scratchpad));
+                } else if (fp && fp->sid.name[0]) {
+                    strncpy(d->scratchpad, fp->sid.name, sizeof(d->scratchpad) - 1);
+                }
+            } else if (line == 3) { /* LSK L4: SID RWY */
+                if (d->scratchpad[0] && fp) {
+                    for (char* p = d->scratchpad; *p; p++)
+                        *p = (char)toupper((unsigned char)*p);
+                    strncpy(fp->sid.runway, d->scratchpad, sizeof(fp->sid.runway) - 1);
+                    set_message(d, "SID RWY SET");
+                    memset(d->scratchpad, 0, sizeof(d->scratchpad));
+                } else if (fp && fp->sid.runway[0]) {
+                    strncpy(d->scratchpad, fp->sid.runway, sizeof(d->scratchpad) - 1);
+                }
+            } else if (line == 5) {
+                d->current_page = 6;
+            }
+        } else {
+            if (line == 2) { /* LSK R3: STAR */
+                if (d->scratchpad[0] && fp) {
+                    for (char* p = d->scratchpad; *p; p++)
+                        *p = (char)toupper((unsigned char)*p);
+                    strncpy(fp->star.name, d->scratchpad, sizeof(fp->star.name) - 1);
+                    set_message(d, "STAR SET");
+                    memset(d->scratchpad, 0, sizeof(d->scratchpad));
+                } else if (fp && fp->star.name[0]) {
+                    strncpy(d->scratchpad, fp->star.name, sizeof(d->scratchpad) - 1);
+                }
+            } else if (line == 3) { /* LSK R4: STAR RWY */
+                if (d->scratchpad[0] && fp) {
+                    for (char* p = d->scratchpad; *p; p++)
+                        *p = (char)toupper((unsigned char)*p);
+                    strncpy(fp->star.runway, d->scratchpad, sizeof(fp->star.runway) - 1);
+                    set_message(d, "STAR RWY SET");
+                    memset(d->scratchpad, 0, sizeof(d->scratchpad));
+                } else if (fp && fp->star.runway[0]) {
+                    strncpy(d->scratchpad, fp->star.runway, sizeof(d->scratchpad) - 1);
+                }
+            }
+        }
+        break;
+
+    case 7: /* CLB */
+        if (side == 0) {
+            if (line == 1 && d->scratchpad[0] && fp) {
+                fp->cruise_altitude_ft = (float)atof(d->scratchpad);
+                set_message(d, "CRZ ALT SET");
+                memset(d->scratchpad, 0, sizeof(d->scratchpad));
+            } else if (line == 2 && d->scratchpad[0] && fp) {
+                float v1 = 0, v2 = 0;
+                if (sscanf(d->scratchpad, "%f/%f", &v1, &v2) == 2) {
+                    fp->climb_tgt_spd_mach = v1;
+                    fp->climb_tgt_spd_kts = v2;
+                    set_message(d, "TGT SPD SET");
+                } else {
+                    float v = (float)atof(d->scratchpad);
+                    if (v < 1.0f) fp->climb_tgt_spd_mach = v;
+                    else fp->climb_tgt_spd_kts = v;
+                    set_message(d, "TGT SPD SET");
+                }
+                memset(d->scratchpad, 0, sizeof(d->scratchpad));
+            } else if (line == 3 && d->scratchpad[0] && fp) {
+                float v1 = 0, v2 = 0;
+                if (sscanf(d->scratchpad, "%f/%f", &v1, &v2) == 2) {
+                    fp->climb_spd_rest_kts = v1;
+                    fp->climb_spd_rest_alt_ft = v2;
+                    set_message(d, "SPD REST SET");
+                }
+                memset(d->scratchpad, 0, sizeof(d->scratchpad));
+            } else if (line == 5) {
+                d->current_page = 7;
+            }
+        }
+        break;
+
+    case 8: /* CRZ */
+        if (side == 0) {
+            if (line == 1 && d->scratchpad[0] && fp) {
+                fp->cruise_altitude_ft = (float)atof(d->scratchpad);
+                set_message(d, "CRZ ALT SET");
+                memset(d->scratchpad, 0, sizeof(d->scratchpad));
+            } else if (line == 2 && d->scratchpad[0] && fp) {
+                float v = (float)atof(d->scratchpad);
+                if (v < 1.0f) fp->cruise_tgt_spd_mach = v;
+                else fp->cruise_tgt_spd_mach = v / 100.0f;
+                set_message(d, "TGT SPD SET");
+                memset(d->scratchpad, 0, sizeof(d->scratchpad));
+            } else if (line == 5) {
+                d->current_page = 8;
+            }
+        }
+        break;
+
+    case 9: /* DES */
+        if (side == 0) {
+            if (line == 1 && d->scratchpad[0] && fp) {
+                fp->descent_ed_alt_ft = (float)atof(d->scratchpad);
+                set_message(d, "E/D ALT SET");
+                memset(d->scratchpad, 0, sizeof(d->scratchpad));
+            } else if (line == 2 && d->scratchpad[0] && fp) {
+                float v1 = 0, v2 = 0;
+                if (sscanf(d->scratchpad, "%f/%f", &v1, &v2) == 2) {
+                    fp->descent_tgt_spd_mach = v1;
+                    fp->descent_tgt_spd_kts = v2;
+                    set_message(d, "TGT SPD SET");
+                } else {
+                    float v = (float)atof(d->scratchpad);
+                    if (v < 1.0f) fp->descent_tgt_spd_mach = v;
+                    else fp->descent_tgt_spd_kts = v;
+                    set_message(d, "TGT SPD SET");
+                }
+                memset(d->scratchpad, 0, sizeof(d->scratchpad));
+            } else if (line == 3 && d->scratchpad[0] && fp) {
+                float v1 = 0, v2 = 0;
+                if (sscanf(d->scratchpad, "%f/%f", &v1, &v2) == 2) {
+                    fp->descent_spd_rest_kts = v1;
+                    fp->descent_spd_rest_alt_ft = v2;
+                    set_message(d, "SPD REST SET");
+                }
+                memset(d->scratchpad, 0, sizeof(d->scratchpad));
+            } else if (line == 5) {
+                d->current_page = 9;
+            }
+        }
+        break;
     }
 }
 
@@ -825,28 +1064,37 @@ static void xp_forward_cdu_key(FMCData* d, const char* label)
         return;
     }
 
+    /* --- NUM_X digits --- */
+    if (strncmp(label, "NUM_", 4) == 0 && label[4] >= '0' && label[4] <= '9' && label[5] == '\0') {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "sim/FMS/key_%c", label[4]);
+        xplane_send_command(d->app->xp_send_sock, d->app->xp_host,
+                            d->app->xp_send_port, buf);
+        return;
+    }
+
     /* --- Fixed-label mappings --- */
     if      (strcmp(label, "CLR")       == 0) cmd = "sim/FMS/key_clear";
     else if (strcmp(label, "DEL")       == 0) cmd = "sim/FMS/key_delete";
-    else if (strcmp(label, "SP")        == 0) cmd = "sim/FMS/key_space";
-    else if (strcmp(label, "/")         == 0) cmd = "sim/FMS/key_slash";
-    else if (strcmp(label, ".")         == 0) cmd = "sim/FMS/key_period";
-    else if (strcmp(label, "+/-")       == 0) cmd = "sim/FMS/key_plus_minus";
+    else if (strcmp(label, "SPACE")     == 0 || strcmp(label, "SP") == 0) cmd = "sim/FMS/key_space";
+    else if (strcmp(label, "SLASH")     == 0 || strcmp(label, "/") == 0) cmd = "sim/FMS/key_slash";
+    else if (strcmp(label, "DOT")       == 0 || strcmp(label, ".") == 0) cmd = "sim/FMS/key_period";
+    else if (strcmp(label, "PLUS_MINUS")== 0 || strcmp(label, "+/-") == 0) cmd = "sim/FMS/key_plus_minus";
     else if (strcmp(label, "EXEC")      == 0) cmd = "sim/FMS/key_exec";
-    else if (strcmp(label, "INIT REF")  == 0) cmd = "sim/FMS/key_load";
+    else if (strcmp(label, "INIT_REF")  == 0 || strcmp(label, "INIT REF") == 0) cmd = "sim/FMS/key_load";
     else if (strcmp(label, "RTE")       == 0) cmd = "sim/FMS/key_route";
     else if (strcmp(label, "CLB")       == 0) cmd = "sim/FMS/key_clb";
     else if (strcmp(label, "CRZ")       == 0) cmd = "sim/FMS/key_crz";
     else if (strcmp(label, "DES")       == 0) cmd = "sim/FMS/key_des";
-    else if (strcmp(label, "DIR INTC")  == 0) cmd = "sim/FMS/key_dir_intc";
+    else if (strcmp(label, "DIR_INTC")  == 0 || strcmp(label, "DIR INTC") == 0) cmd = "sim/FMS/key_dir_intc";
     else if (strcmp(label, "LEGS")      == 0) cmd = "sim/FMS/key_legs";
-    else if (strcmp(label, "DEP ARR")   == 0) cmd = "sim/FMS/key_dep_arr";
+    else if (strcmp(label, "DEP_ARR")   == 0 || strcmp(label, "DEP ARR") == 0) cmd = "sim/FMS/key_dep_arr";
     else if (strcmp(label, "HOLD")      == 0) cmd = "sim/FMS/key_hold";
     else if (strcmp(label, "PROG")      == 0) cmd = "sim/FMS/key_prog";
     else if (strcmp(label, "FIX")       == 0) cmd = "sim/FMS/key_fix";
-    else if (strcmp(label, "NAV RAD")   == 0) cmd = "sim/FMS/key_nav_rad";
-    else if (strcmp(label, "PREV PAGE") == 0) cmd = "sim/FMS/key_prev_page";
-    else if (strcmp(label, "NEXT PAGE") == 0) cmd = "sim/FMS/key_next_page";
+    else if (strcmp(label, "NAV_RAD")   == 0 || strcmp(label, "NAV RAD") == 0) cmd = "sim/FMS/key_nav_rad";
+    else if (strcmp(label, "PREV_PAGE") == 0 || strcmp(label, "PREV PAGE") == 0) cmd = "sim/FMS/key_prev_page";
+    else if (strcmp(label, "NEXT_PAGE") == 0 || strcmp(label, "NEXT PAGE") == 0) cmd = "sim/FMS/key_next_page";
     else if (strcmp(label, "PERF")      == 0) cmd = "sim/FMS/key_perf";
 
     if (cmd) {
@@ -867,29 +1115,29 @@ static int cdu_button_action(FMCData* d, const char* label)
     /* === Function keys (3 rows × 5 cols + EXEC) === */
 
     /* Row 0: INIT REF | RTE | CLB | CRZ | DES */
-    if (strcmp(label, "INIT REF") == 0) { d->current_page = 0; d->legs_scroll = 0; return 1; }
+    if (strcmp(label, "INIT_REF") == 0 || strcmp(label, "INIT REF") == 0) { d->current_page = 0; d->legs_scroll = 0; return 1; }
     if (strcmp(label, "RTE")     == 0) { d->current_page = 1; d->legs_scroll = 0; return 1; }
-    if (strcmp(label, "CLB")     == 0) { set_message(d, "CLB: NOT IN USE"); return 1; }
-    if (strcmp(label, "CRZ")     == 0) { set_message(d, "CRZ: NOT IN USE"); return 1; }
-    if (strcmp(label, "DES")     == 0) { set_message(d, "DES: NOT IN USE"); return 1; }
+    if (strcmp(label, "CLB")     == 0) { d->current_page = 7; return 1; }
+    if (strcmp(label, "CRZ")     == 0) { d->current_page = 8; return 1; }
+    if (strcmp(label, "DES")     == 0) { d->current_page = 9; return 1; }
 
     /* Row 1: DIR INTC | LEGS | DEP ARR | HOLD | PROG */
-    if (strcmp(label, "DIR INTC") == 0) { set_message(d, "DIR: SELECT WPT"); return 1; }
+    if (strcmp(label, "DIR_INTC") == 0 || strcmp(label, "DIR INTC") == 0) { set_message(d, "DIR: SELECT WPT"); return 1; }
     if (strcmp(label, "LEGS")    == 0) { d->current_page = 2; return 1; }
-    if (strcmp(label, "DEP ARR") == 0) { set_message(d, "DEP/ARR: USE RTE"); return 1; }
+    if (strcmp(label, "DEP_ARR") == 0 || strcmp(label, "DEP ARR") == 0) { d->current_page = 6; return 1; }
     if (strcmp(label, "HOLD")    == 0) { set_message(d, "HOLD: NOT IN USE"); return 1; }
     if (strcmp(label, "PROG")    == 0) { d->current_page = 4; return 1; }
 
     /* Row 2: FIX | NAV RAD | PREV PAGE | NEXT PAGE | PERF */
     if (strcmp(label, "FIX")      == 0) { set_message(d, "FIX: NOT IN USE"); return 1; }
-    if (strcmp(label, "NAV RAD")  == 0) { d->current_page = 5; return 1; }
-    if (strcmp(label, "PREV PAGE") == 0) {
-        d->current_page = (d->current_page + 5) % 6;  /* cycle backward */
+    if (strcmp(label, "NAV_RAD")  == 0 || strcmp(label, "NAV RAD") == 0) { d->current_page = 5; return 1; }
+    if (strcmp(label, "PREV_PAGE") == 0 || strcmp(label, "PREV PAGE") == 0) {
+        d->current_page = (d->current_page + 9) % 10;  /* cycle backward */
         d->legs_scroll = 0;
         return 1;
     }
-    if (strcmp(label, "NEXT PAGE") == 0) {
-        d->current_page = (d->current_page + 1) % 6;  /* cycle forward */
+    if (strcmp(label, "NEXT_PAGE") == 0 || strcmp(label, "NEXT PAGE") == 0) {
+        d->current_page = (d->current_page + 1) % 10;  /* cycle forward */
         d->legs_scroll = 0;
         return 1;
     }
@@ -909,29 +1157,38 @@ static int cdu_button_action(FMCData* d, const char* label)
         if (slen > 0) d->scratchpad[slen - 1] = '\0';
         return 1;
     }
-    if (strcmp(label, "SP") == 0) {
+    if (strcmp(label, "SPACE") == 0 || strcmp(label, "SP") == 0) {
         int slen = (int)strlen(d->scratchpad);
         if (slen < MAX_SCRATCHPAD) { d->scratchpad[slen] = ' '; d->scratchpad[slen + 1] = '\0'; }
         return 1;
     }
-    if (strcmp(label, "/") == 0) {
+    if (strcmp(label, "SLASH") == 0 || strcmp(label, "/") == 0) {
         int slen = (int)strlen(d->scratchpad);
         if (slen < MAX_SCRATCHPAD) { d->scratchpad[slen] = '/'; d->scratchpad[slen + 1] = '\0'; }
         return 1;
     }
 
     /* === Numbers & symbols === */
-    if (strcmp(label, "+/-") == 0) {
+    if (strcmp(label, "PLUS_MINUS") == 0 || strcmp(label, "+/-") == 0) {
         int slen = (int)strlen(d->scratchpad);
         if (slen < MAX_SCRATCHPAD) { d->scratchpad[slen] = '-'; d->scratchpad[slen + 1] = '\0'; }
         return 1;
     }
+    
+    // Handle "NUM_X"
+    if (strncmp(label, "NUM_", 4) == 0 && label[4] >= '0' && label[4] <= '9' && label[5] == '\0') {
+        int slen = (int)strlen(d->scratchpad);
+        if (slen < MAX_SCRATCHPAD) { d->scratchpad[slen] = label[4]; d->scratchpad[slen + 1] = '\0'; }
+        return 1;
+    }
+    // Handle plain "0"-"9" from check_cdu_click
     if (label[0] >= '0' && label[0] <= '9' && label[1] == '\0') {
         int slen = (int)strlen(d->scratchpad);
         if (slen < MAX_SCRATCHPAD) { d->scratchpad[slen] = label[0]; d->scratchpad[slen + 1] = '\0'; }
         return 1;
     }
-    if (strcmp(label, ".") == 0) {
+
+    if (strcmp(label, "DOT") == 0 || strcmp(label, ".") == 0) {
         int slen = (int)strlen(d->scratchpad);
         if (slen < MAX_SCRATCHPAD) { d->scratchpad[slen] = '.'; d->scratchpad[slen + 1] = '\0'; }
         return 1;
@@ -1233,10 +1490,13 @@ static void draw_fmc_screen(SDL_Renderer* r, const SDL_Rect* rect, FMCData* d)
     draw_text_simple(r, screen_left + screen_w / 2, screen_top - TITLE_BAR_H / 2, "FMC-CDU", 0.8f);
 
     /* Page indicator */
-    const char* page_names[] = { "IDENT", "RTE", "LEGS", "PERF", "PROG", "RADIO" };
+    const char* page_names[] = { "IDENT", "RTE", "LEGS", "PERF", "PROG", "RADIO", "DEP/ARR", "CLB", "CRZ", "DES" };
     char page_title[32];
-    snprintf(page_title, sizeof(page_title), "%d/6 %s",
-             d->current_page + 1, page_names[d->current_page]);
+    int page_idx = d->current_page;
+    if (page_idx < 0) page_idx = 0;
+    if (page_idx > 9) page_idx = 9;
+    snprintf(page_title, sizeof(page_title), "%d/10 %s",
+             page_idx + 1, page_names[page_idx]);
     draw_text_simple(r, screen_left + screen_w - 40, screen_top - TITLE_BAR_H / 2, page_title, 0.6f);
 
     /* Display lines */
@@ -1400,9 +1660,12 @@ static void fmc_on_render(Instrument* self, SDL_Renderer* renderer)
 
     // Title bar
     set_col(renderer, COL_WHITE);
-    const char* page_names[] = { "IDENT", "RTE", "LEGS", "PERF", "PROG", "RADIO" };
+    const char* page_names[] = { "IDENT", "RTE", "LEGS", "PERF", "PROG", "RADIO", "DEP/ARR", "CLB", "CRZ", "DES" };
     char page_title[32];
-    snprintf(page_title, sizeof(page_title), "%d/6 %s", d->current_page + 1, page_names[d->current_page]);
+    int page_idx = d->current_page;
+    if (page_idx < 0) page_idx = 0;
+    if (page_idx > 9) page_idx = 9;
+    snprintf(page_title, sizeof(page_title), "%d/10 %s", page_idx + 1, page_names[page_idx]);
     draw_text_simple(renderer, sx + sw - 40, screen_top + line_h/2, page_title, 0.6f);
     draw_text_simple(renderer, sx + sw/2, screen_top + line_h/2, "FMC-CDU", 0.7f);
 

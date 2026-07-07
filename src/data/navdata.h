@@ -120,6 +120,22 @@ typedef struct {
     float         cruise_altitude_ft;
     float         cruise_speed_kts;    /* TAS */
 
+    /* Climb parameters */
+    float         climb_tgt_spd_mach;
+    float         climb_tgt_spd_kts;
+    float         climb_spd_rest_kts;
+    float         climb_spd_rest_alt_ft;
+
+    /* Cruise parameters */
+    float         cruise_tgt_spd_mach;
+
+    /* Descent parameters */
+    float         descent_tgt_spd_mach;
+    float         descent_tgt_spd_kts;
+    float         descent_spd_rest_kts;
+    float         descent_spd_rest_alt_ft;
+    float         descent_ed_alt_ft;
+
     /* Route statistics (computed) */
     float         total_distance_nm;
     float         estimated_time_hours;

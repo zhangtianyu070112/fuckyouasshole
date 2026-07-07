@@ -436,6 +436,20 @@ void flight_plan_clear(FlightPlan* plan)
     plan->total_distance_nm = 0.0f;
     plan->estimated_time_hours = 0.0f;
     plan->fuel_required_lbs = 0.0f;
+    
+    plan->climb_tgt_spd_mach = 0.78f;
+    plan->climb_tgt_spd_kts = 280.0f;
+    plan->climb_spd_rest_kts = 250.0f;
+    plan->climb_spd_rest_alt_ft = 10000.0f;
+    
+    plan->cruise_tgt_spd_mach = 0.78f;
+    
+    plan->descent_tgt_spd_mach = 0.78f;
+    plan->descent_tgt_spd_kts = 280.0f;
+    plan->descent_spd_rest_kts = 250.0f;
+    plan->descent_spd_rest_alt_ft = 10000.0f;
+    plan->descent_ed_alt_ft = 10000.0f;
+
     /* FMCState::plan_modified must be set by the caller */
 }
 
