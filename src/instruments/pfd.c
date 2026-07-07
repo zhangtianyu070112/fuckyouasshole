@@ -397,6 +397,26 @@ static void draw_attitude_indicator(SDL_Renderer* r, const PFDLayout* lay,
         /* Remove the nose line, just keep the Ls and the dot */
     }
 
+    /* ---- Radio altitude display at bottom of ADI ---- */
+    if (f->altitude_agl_ft <= 2500.0f && f->altitude_agl_ft >= -50.0f) {
+        char ra_str[16];
+        snprintf(ra_str, sizeof(ra_str), "%.0f", (double)f->altitude_agl_ft);
+        
+        int box_w = 60;
+        int box_h = 24;
+        int box_x = cx - box_w / 2;
+        int box_y = cy + R - box_h - 4; // near the bottom of the ADI circle
+        
+        SDL_Rect ra_box = { box_x, box_y, box_w, box_h };
+        set_color(r, COL_BACKGROUND); // Black background
+        SDL_RenderFillRect(r, &ra_box);
+        set_color(r, COL_HORIZON_WHITE); // White border
+        SDL_RenderDrawRect(r, &ra_box);
+        
+        /* White text */
+        font_draw_scaled_aligned(r, cx, box_y + box_h / 2 + 4, ra_str, 0.65f, FONT_BOLD, FONT_ALIGN_CENTER);
+    }
+
     /* ---- Circle border ---- */
     set_color(r, COL_LINE_GRAY);
     for (int i = 0; i < 72; i++) {

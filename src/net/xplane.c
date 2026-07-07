@@ -77,6 +77,9 @@ static void apply_data_group(FlightDataValues* f, int index,
         if (num_vals > 0) f->mach   = vals[0];
         if (num_vals > 2) f->vs_fpm = vals[2];  /* VVI is usually at index 2 in group 4 */
         
+        /* Calculate TAT accurately using OAT and Mach */
+        f->tat_c = (f->oat_c + 273.15f) * (1.0f + 0.2f * f->mach * f->mach) - 273.15f;
+
         /* Debug log group 4 to see what it contains */
         static int print_count = 0;
         if (print_count++ % 100 == 0) {
@@ -310,6 +313,9 @@ static void apply_data_group(FlightDataValues* f, int index,
         if (num_vals > 3) f->oat_c          = vals[3];
         if (num_vals > 0) f->wind_speed_kts = vals[1];
         if (num_vals > 1) f->wind_dir_deg   = vals[2];
+        
+        /* Calculate TAT accurately using OAT and Mach */
+        f->tat_c = (f->oat_c + 273.15f) * (1.0f + 0.2f * f->mach * f->mach) - 273.15f;
         break;
 
     /* 109: Anti-ice switches */

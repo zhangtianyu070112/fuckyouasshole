@@ -326,7 +326,7 @@ static void init_instruments(App* app)
     }
     
     /* Initialize standalone FMC window */
-    if (config_get_bool(app->config, "instruments", "standalone_fmc_enabled", 1)) {
+    if (config_get_bool(app->config, "instruments", "standalone_fmc_enabled", 0)) {
         if (standalone_fmc_init(app) != 0) {
             LOG_ERROR("Failed to init standalone FMC");
         } else {
@@ -335,7 +335,7 @@ static void init_instruments(App* app)
     }
 
     /* Initialize standalone PFD window */
-    if (config_get_bool(app->config, "instruments", "standalone_pfd_enabled", 1)) {
+    if (config_get_bool(app->config, "instruments", "standalone_pfd_enabled", 0)) {
         if (standalone_pfd_init(app) != 0) {
             LOG_ERROR("Failed to init standalone PFD");
         } else {
@@ -344,7 +344,7 @@ static void init_instruments(App* app)
     }
 
     /* Initialize standalone ND window */
-    if (config_get_bool(app->config, "instruments", "standalone_nd_enabled", 1)) {
+    if (config_get_bool(app->config, "instruments", "standalone_nd_enabled", 0)) {
         if (standalone_nd_init(app) != 0) {
             LOG_ERROR("Failed to init standalone ND");
         } else {
@@ -353,7 +353,7 @@ static void init_instruments(App* app)
     }
 
     /* Initialize standalone EICAS1 window */
-    if (config_get_bool(app->config, "instruments", "standalone_eicas1_enabled", 1)) {
+    if (config_get_bool(app->config, "instruments", "standalone_eicas1_enabled", 0)) {
         if (standalone_eicas1_init(app) != 0) {
             LOG_ERROR("Failed to init standalone EICAS1");
         } else {
@@ -362,7 +362,7 @@ static void init_instruments(App* app)
     }
 
     /* Initialize standalone EICAS2 window */
-    if (config_get_bool(app->config, "instruments", "standalone_eicas2_enabled", 1)) {
+    if (config_get_bool(app->config, "instruments", "standalone_eicas2_enabled", 0)) {
         if (standalone_eicas2_init(app) != 0) {
             LOG_ERROR("Failed to init standalone EICAS2");
         } else {

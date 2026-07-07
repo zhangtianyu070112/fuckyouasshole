@@ -432,24 +432,18 @@ static void eicas_on_render(Instrument* self, SDL_Renderer* renderer)
 
     const FlightDataValues* f = &d->fd;
 
-    /* --- TAT display (right side of title bar) --- */
+    /* --- TAT display (top right corner of EICAS screen) --- */
     {
-        float tat = f->oat_c;  /* TAT ≈ OAT + ram rise; OAT is close enough for now */
-        if (f->gs_kts > 100.0f) {
-            /* Ram rise: ~(TAS/100)² * 0.55°C */
-            float ram = (f->tas_kts / 100.0f) * (f->tas_kts / 100.0f) * 0.55f;
-            tat += ram;
-        }
         char tat_str[24];
-        snprintf(tat_str, sizeof(tat_str), "TAT %+.0f°C", (double)tat);
-        set_col(renderer, COL_CYAN);
-        font_draw_scaled_aligned(renderer, rect->x + rect->w - 8, rect->y + 20,
-                                 tat_str, 0.5f, FONT_REGULAR, FONT_ALIGN_RIGHT);
+        snprintf(tat_str, sizeof(tat_str), "TAT %+.0f°C", (double)f->tat_c);
+        set_col(renderer, COL_WHITE);
+        font_draw_scaled_aligned(renderer, rect->x + rect->w - 20, rect->y + 25,
+                                 tat_str, 0.6f, FONT_REGULAR, FONT_ALIGN_RIGHT);
     }
 
     /* --- Layout dimensions --- */
     int title_h   = 20;
-    int engine_top = rect->y + title_h + 6;
+    int engine_top = rect->y + title_h + 16;
 
     /* Arc sizing: make arcs as large as the column width allows */
     int left_col_x  = rect->x + rect->w * 3 / 100;
@@ -526,104 +520,6 @@ static void eicas_on_render(Instrument* self, SDL_Renderer* renderer)
         if (fuel_h < 80) fuel_h = 80;
         draw_fuel_qty_box(renderer, fuel_x, fuel_y, fuel_w, fuel_h,
                           f->fuel_total_lbs);
-    }
-
-    /* =====================================================================
-     *  CAS alert light panel (bottom-left, below engine arcs)
-     * ===================================================================== */
-    {
-        int cas_y = engine_top + engine_h + 4;
-        int cas_h = rect->y + rect->h - cas_y - 4;
-        if (cas_h < 50) cas_h = 50;
-        int cas_x = rect->x + 4;
-        int cas_w = rect->w * 62 / 100;
-
-        /* Panel background */
-        set_col(renderer, COL_TAPE_BG);
-        SDL_Rect cas_bg = { cas_x, cas_y, cas_w, cas_h };
-        SDL_RenderFillRect(renderer, &cas_bg);
-        set_col(renderer, COL_DARK_GRAY);
-        SDL_RenderDrawRect(renderer, &cas_bg);
-
-        /* Title */
-        set_col(renderer, COL_GRAY);
-        draw_text_left(renderer, cas_x + 6, cas_y + 10, "CAS", 0.45f);
-
-        AlertDef alerts[12];
-        int alert_count = eval_alerts(f, alerts);
-
-        /* Compact grid: 4 cols × up to 3 rows */
-        int light_w = (cas_w - 40) / 4;
-        if (light_w > 60) light_w = 60;
-        int light_h = 24;
-        int cols = 4;
-        int gap_x = 5, gap_y = 4;
-        int start_x = cas_x + 6;
-        int start_y = cas_y + 20;
-
-        for (int i = 0; i < alert_count; i++) {
-            int row = i / cols;
-            int col = i % cols;
-            int lx = start_x + col * (light_w + gap_x);
-            int ly = start_y + row * (light_h + gap_y + 10);
-
-            SDL_Rect lr = { lx, ly, light_w, light_h };
-
-            if (alerts[i].active) {
-                if (alerts[i].is_red) {
-                    set_col(renderer, 0xCC, 0x10, 0x10, 255);
-                    SDL_RenderFillRect(renderer, &lr);
-                    set_col(renderer, 0xFF, 0x40, 0x40, 255);
-                } else {
-                    set_col(renderer, 0xE0, 0xA0, 0x00, 255);
-                    SDL_RenderFillRect(renderer, &lr);
-                    set_col(renderer, 0xFF, 0xD0, 0x20, 255);
-                }
-                SDL_RenderDrawRect(renderer, &lr);
-                set_col(renderer, COL_WHITE);
-            } else {
-                set_col(renderer, 0x18, 0x18, 0x1E, 255);
-                SDL_RenderFillRect(renderer, &lr);
-                set_col(renderer, 0x30, 0x30, 0x36, 255);
-                SDL_RenderDrawRect(renderer, &lr);
-                set_col(renderer, COL_GRAY);
-            }
-            font_draw_scaled_aligned(renderer, lx + light_w / 2,
-                                     ly + light_h + 4, alerts[i].label,
-                                     0.38f, FONT_REGULAR, FONT_ALIGN_CENTER);
-        }
-
-        /* --- Alert event log (inside CAS panel, bottom area) --- */
-        if (d->alert_log && cas_h > 80) {
-            int log_size = ll_size(d->alert_log);
-            if (log_size > 0) {
-                int show_count = log_size < 2 ? log_size : 2;
-                int log_y = cas_y + cas_h - 2 - show_count * 11;
-
-                set_col(renderer, COL_DARK_GRAY);
-                SDL_RenderDrawLine(renderer, cas_x + 4, log_y - 2,
-                                   cas_x + cas_w - 4, log_y - 2);
-
-                for (int i = 0; i < show_count; i++) {
-                    AlertEvent* evt = (AlertEvent*)ll_get(d->alert_log,
-                                            log_size - 1 - i);
-                    if (!evt) continue;
-
-                    Uint32 elapsed = SDL_GetTicks() - evt->timestamp;
-                    int mins = (int)(elapsed / 60000);
-                    int secs = (int)(elapsed / 1000) % 60;
-
-                    char line[48];
-                    snprintf(line, sizeof(line), "+%02d:%02d %-6s %s",
-                             mins, secs, evt->label,
-                             evt->active ? "ON" : "OFF");
-
-                    set_col(renderer, evt->active ? COL_RED : COL_DARK_GRAY);
-                    draw_text_left(renderer, cas_x + 6, log_y + i * 11,
-                                   line, 0.35f);
-                }
-            }
-        }
     }
 
     /* Border */

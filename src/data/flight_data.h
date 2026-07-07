@@ -112,6 +112,7 @@ typedef struct FlightDataValues {
     float wind_dir_deg;       /* Wind direction (°) */
     float oat_c;              /* Outside air temperature (°C) */
     float oat_isa_dev_c;      /* ISA deviation (°C) */
+    float tat_c;              /* Total air temperature (°C) */
 
     /* --- Pressurization (new) --- */
     float cabin_alt_ft;       /* Cabin altitude (feet) */
