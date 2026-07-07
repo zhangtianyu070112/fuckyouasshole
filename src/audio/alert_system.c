@@ -39,6 +39,8 @@
 typedef enum {
     ALERT_PULL_UP = 0,
     ALERT_WINDSHEAR,
+    ALERT_MASTER_WARNING,
+    ALERT_MASTER_CAUTION,
     ALERT_TERRAIN,
     ALERT_SINK_RATE,
     ALERT_TOO_LOW_GEAR,
@@ -46,6 +48,7 @@ typedef enum {
     ALERT_GLIDESLOPE,
     ALERT_BANK_ANGLE,
     ALERT_OVERSPEED,
+    ALERT_STALL,
     ALERT_MINIMUMS,
     ALERT_TYPE_COUNT
 } AlertType;
@@ -54,20 +57,25 @@ typedef enum {
 static const int alert_priority[ALERT_TYPE_COUNT] = {
     0,  /* PULL_UP      — critical */
     1,  /* WINDSHEAR    — critical */
-    2,  /* TERRAIN      — warning */
-    3,  /* SINK_RATE    — warning */
-    4,  /* TOO_LOW_GEAR — warning */
-    5,  /* TOO_LOW_FLAPS— caution */
-    6,  /* GLIDESLOPE   — caution */
-    7,  /* BANK_ANGLE   — caution */
-    8,  /* OVERSPEED    — caution */
-    9,  /* MINIMUMS     — advisory */
+    2,  /* MASTER_WARNING */
+    3,  /* MASTER_CAUTION */
+    4,  /* TERRAIN      — warning */
+    5,  /* SINK_RATE    — warning */
+    6,  /* TOO_LOW_GEAR — warning */
+    7,  /* TOO_LOW_FLAPS— caution */
+    8,  /* GLIDESLOPE   — caution */
+    9,  /* BANK_ANGLE   — caution */
+    10, /* OVERSPEED    — caution */
+    11, /* STALL        — critical */
+    12, /* MINIMUMS     — advisory */
 };
 
 /* Cooldown between repeated triggers (seconds) */
 static const float alert_cooldown[ALERT_TYPE_COUNT] = {
     2.5f,   /* PULL_UP      — replay every 2.5s while condition holds */
     2.0f,   /* WINDSHEAR    */
+    2.0f,   /* MASTER_WARNING */
+    2.0f,   /* MASTER_CAUTION */
     3.0f,   /* TERRAIN      */
     3.0f,   /* SINK_RATE    */
     2.0f,   /* TOO_LOW_GEAR */
@@ -75,6 +83,7 @@ static const float alert_cooldown[ALERT_TYPE_COUNT] = {
     2.0f,   /* GLIDESLOPE   */
     2.0f,   /* BANK_ANGLE   */
     1.5f,   /* OVERSPEED    */
+    1.5f,   /* STALL        */
     5.0f,   /* MINIMUMS     — trigger once */
 };
 
@@ -183,6 +192,45 @@ static void configure_tone(ToneSlot* t, AlertType type)
         t->samples_total   = SAMPLE_RATE * 2;
         t->pulse_on_samples  = (SAMPLE_RATE * 100) / 1000;
         t->pulse_off_samples = (SAMPLE_RATE * 100) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_MASTER_WARNING:
+        /* Fire/Master warning bell simulation: continuous rapid ringing */
+        t->wave        = WAVE_SAW;
+        t->freq        = 850.0f;
+        t->freq_start  = 850.0f;
+        t->freq_end    = 850.0f;
+        t->volume      = 0.35f;
+        t->samples_total   = SAMPLE_RATE * 2;
+        t->pulse_on_samples  = (SAMPLE_RATE * 40) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 40) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_MASTER_CAUTION:
+        /* Single/Double chime */
+        t->wave        = WAVE_SINE;
+        t->freq        = 600.0f;
+        t->freq_start  = 600.0f;
+        t->freq_end    = 600.0f;
+        t->volume      = 0.30f;
+        t->samples_total   = SAMPLE_RATE * 1;
+        t->pulse_on_samples  = (SAMPLE_RATE * 150) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 100) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_STALL:
+        /* Clacker / Stick shaker simulation: loud low frequency pulsing */
+        t->wave        = WAVE_SAW;
+        t->freq        = 100.0f;
+        t->freq_start  = 100.0f;
+        t->freq_end    = 100.0f;
+        t->volume      = 0.40f;
+        t->samples_total   = SAMPLE_RATE * 2;
+        t->pulse_on_samples  = (SAMPLE_RATE * 50) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 50) / 1000;
         t->pulse_state = 1;
         break;
 
@@ -567,6 +615,27 @@ static void evaluate_alerts(AlertSystem* as, const FlightDataValues* fd, float d
         tone_start(as, ALERT_PULL_UP);
         as->cooldown_timer[ALERT_PULL_UP] = alert_cooldown[ALERT_PULL_UP];
         LOG_DEBUG("ALERT: PULL UP (AGL=%.0f, VS=%.0f)", (double)agl_ft, (double)vs_fpm);
+    }
+
+    /* --- Stall Warning ----------------------------------------------------- */
+    if (ias_kts < 110.0f && agl_ft > 0.0f && as->cooldown_timer[ALERT_STALL] <= 0.0f) {
+        tone_start(as, ALERT_STALL);
+        as->cooldown_timer[ALERT_STALL] = alert_cooldown[ALERT_STALL];
+        LOG_DEBUG("ALERT: STALL (IAS=%.0f)", (double)ias_kts);
+    }
+
+    /* --- Master Warning / Fire --------------------------------------------- */
+    if (fd->master_warning && as->cooldown_timer[ALERT_MASTER_WARNING] <= 0.0f) {
+        tone_start(as, ALERT_MASTER_WARNING);
+        as->cooldown_timer[ALERT_MASTER_WARNING] = alert_cooldown[ALERT_MASTER_WARNING];
+        LOG_DEBUG("ALERT: MASTER WARNING");
+    }
+
+    /* --- Master Caution ---------------------------------------------------- */
+    if (fd->master_caution && as->cooldown_timer[ALERT_MASTER_CAUTION] <= 0.0f) {
+        tone_start(as, ALERT_MASTER_CAUTION);
+        as->cooldown_timer[ALERT_MASTER_CAUTION] = alert_cooldown[ALERT_MASTER_CAUTION];
+        LOG_DEBUG("ALERT: MASTER CAUTION");
     }
 
     /* --- 2. WINDSHEAR ------------------------------------------------------

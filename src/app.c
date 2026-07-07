@@ -689,6 +689,59 @@ static void main_loop(App* app)
             int offset_y = (app->screen_h - render_h) / 2;
             SDL_Rect bg_rect = {offset_x, offset_y, render_w, render_h};
             SDL_RenderCopy(app->renderer, app->bg_texture, NULL, &bg_rect);
+
+            /* ---- Master Warning / Caution Lights ---- */
+            Uint32 ticks = SDL_GetTicks();
+            int blink_warn = (snapshot.master_warning && (ticks % 600 < 300));
+            int blink_caut = (snapshot.master_caution && (ticks % 600 < 300));
+
+            if (blink_warn || blink_caut) {
+                SDL_SetRenderDrawBlendMode(app->renderer, SDL_BLENDMODE_BLEND);
+
+                // Captain Side
+                if (blink_warn) {
+                    SDL_Rect r_cw = {
+                        bg_rect.x + (int)(bg_rect.w * 0.197f),
+                        bg_rect.y + (int)(bg_rect.h * 0.088f),
+                        (int)(bg_rect.w * (0.222f - 0.197f)),
+                        (int)(bg_rect.h * (0.125f - 0.088f))
+                    };
+                    SDL_SetRenderDrawColor(app->renderer, 255, 0, 0, 180);
+                    SDL_RenderFillRect(app->renderer, &r_cw);
+                }
+                if (blink_caut) {
+                    SDL_Rect r_cc = {
+                        bg_rect.x + (int)(bg_rect.w * 0.223f),
+                        bg_rect.y + (int)(bg_rect.h * 0.088f),
+                        (int)(bg_rect.w * (0.248f - 0.223f)),
+                        (int)(bg_rect.h * (0.125f - 0.088f))
+                    };
+                    SDL_SetRenderDrawColor(app->renderer, 255, 180, 0, 180);
+                    SDL_RenderFillRect(app->renderer, &r_cc);
+                }
+
+                // FO Side
+                if (blink_caut) {
+                    SDL_Rect r_fc = {
+                        bg_rect.x + (int)(bg_rect.w * 0.768f),
+                        bg_rect.y + (int)(bg_rect.h * 0.085f),
+                        (int)(bg_rect.w * (0.793f - 0.768f)),
+                        (int)(bg_rect.h * (0.123f - 0.085f))
+                    };
+                    SDL_SetRenderDrawColor(app->renderer, 255, 180, 0, 180);
+                    SDL_RenderFillRect(app->renderer, &r_fc);
+                }
+                if (blink_warn) {
+                    SDL_Rect r_fw = {
+                        bg_rect.x + (int)(bg_rect.w * 0.794f),
+                        bg_rect.y + (int)(bg_rect.h * 0.085f),
+                        (int)(bg_rect.w * (0.819f - 0.794f)),
+                        (int)(bg_rect.h * (0.123f - 0.085f))
+                    };
+                    SDL_SetRenderDrawColor(app->renderer, 255, 0, 0, 180);
+                    SDL_RenderFillRect(app->renderer, &r_fw);
+                }
+            }
         }
 
         /* Draw instruments that are NOT zoomed first */

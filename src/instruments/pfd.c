@@ -417,6 +417,15 @@ static void draw_attitude_indicator(SDL_Renderer* r, const PFDLayout* lay,
         font_draw_scaled_aligned(r, cx, box_y + box_h / 2 + 4, ra_str, 0.65f, FONT_BOLD, FONT_ALIGN_CENTER);
     }
 
+    /* ---- Stall / Overspeed Warning Text ---- */
+    if (f->ias_kts < 110.0f && f->altitude_agl_ft > 0.0f) {
+        set_color(r, COL_TEXT_RED);
+        font_draw_scaled_aligned(r, cx, cy - R / 2, "STALL", 1.0f, FONT_BOLD, FONT_ALIGN_CENTER);
+    } else if (f->ias_kts > 340.0f) {
+        set_color(r, COL_TEXT_RED);
+        font_draw_scaled_aligned(r, cx, cy - R / 2, "OVERSPEED", 0.8f, FONT_BOLD, FONT_ALIGN_CENTER);
+    }
+
     /* ---- Circle border ---- */
     set_color(r, COL_LINE_GRAY);
     for (int i = 0; i < 72; i++) {
@@ -453,6 +462,62 @@ static void draw_airspeed_tape(SDL_Renderer* r, const PFDLayout* lay,
     SDL_RenderFillRect(r, &bg);
     set_color(r, COL_BOX_BORDER);
     SDL_RenderDrawRect(r, &bg);
+
+    /* ---- Stall and Overspeed Red Bands (Dashed) ---- */
+    float stall_spd = 110.0f;
+    float over_spd = 340.0f;
+    int line_w = 6;
+    int line_x = tape_r - line_w - 2; /* Inside the right edge of the tape (closest to attitude indicator) */
+
+    /* Draw red dashed band for speeds < 110 kts (Stall) */
+    if (f->altitude_agl_ft > 0.0f && ias < stall_spd + 80.0f) {
+        set_color(r, COL_TEXT_RED);
+        for (float s = stall_spd; s >= ias - 80.0f; s -= 4.0f) {
+            float y_top = (float)tape_mid - (s - ias) * px_kt;
+            float y_bot = (float)tape_mid - ((s - 2.0f) - ias) * px_kt;
+            
+            int dy = (int)y_top;
+            int dh = (int)(y_bot - y_top);
+            
+            if (dy < tape_y) {
+                dh -= (tape_y - dy);
+                dy = tape_y;
+            }
+            if (dy + dh > tape_y + tape_h) {
+                dh = (tape_y + tape_h) - dy;
+            }
+            
+            if (dh > 0 && dy >= tape_y && dy < tape_y + tape_h) {
+                SDL_Rect dash = { line_x, dy, line_w, dh };
+                SDL_RenderFillRect(r, &dash);
+            }
+        }
+    }
+
+    /* Draw red dashed band for speeds > 340 kts (Overspeed) */
+    if (ias > over_spd - 80.0f) {
+        set_color(r, COL_TEXT_RED);
+        for (float s = over_spd; s <= ias + 80.0f; s += 4.0f) {
+            float y_bot = (float)tape_mid - (s - ias) * px_kt;
+            float y_top = (float)tape_mid - ((s + 2.0f) - ias) * px_kt;
+            
+            int dy = (int)y_top;
+            int dh = (int)(y_bot - y_top);
+            
+            if (dy < tape_y) {
+                dh -= (tape_y - dy);
+                dy = tape_y;
+            }
+            if (dy + dh > tape_y + tape_h) {
+                dh = (tape_y + tape_h) - dy;
+            }
+            
+            if (dh > 0 && dy >= tape_y && dy < tape_y + tape_h) {
+                SDL_Rect dash = { line_x, dy, line_w, dh };
+                SDL_RenderFillRect(r, &dash);
+            }
+        }
+    }
 
     /* ---- Tick marks & labels (continuous scrolling) ---- */
     float ias_floor = floorf(ias / 10.0f) * 10.0f;
