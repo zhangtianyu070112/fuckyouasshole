@@ -179,4 +179,40 @@ int xplane_parse_rref(const uint8_t* data, int len, FlightData* fd);
  */
 int xplane_rref_subscribe_all(UDPSocket* sock, const char* xp_host, int xp_port);
 
+/* =========================================================================
+ *  ND-specific RREF subscriptions
+ * ========================================================================= */
+
+/**
+ * @brief RREF request IDs for ND data.
+ *
+ * These supplement the existing DATA packet stream with higher-precision
+ * DREF values for the Navigation Display.
+ */
+#define XP_RREF_ND_LAT      30  /* sim/flightmodel/position/latitude        */
+#define XP_RREF_ND_LON      31  /* sim/flightmodel/position/longitude       */
+#define XP_RREF_ND_MAG_PSI  32  /* sim/flightmodel/position/mag_psi         */
+#define XP_RREF_ND_TAS      33  /* sim/flightmodel/position/true_airspeed   */
+#define XP_RREF_ND_GS       34  /* sim/flightmodel/position/groundspeed     */
+
+/**
+ * @brief Subscribe to all 5 ND-specific DREFs.
+ *
+ * Sends RREF requests for:
+ *   - sim/flightmodel/position/latitude       (float, degrees)
+ *   - sim/flightmodel/position/longitude      (float, degrees)
+ *   - sim/flightmodel/position/mag_psi        (float, degrees)
+ *   - sim/flightmodel/position/true_airspeed  (float, m/s)
+ *   - sim/flightmodel/position/groundspeed    (float, m/s)
+ *
+ * Values are parsed by xplane_parse_rref() and stored in
+ * FlightDataValues::dref_nd_* fields.
+ *
+ * @param sock     Our UDP socket.
+ * @param xp_host  X-Plane host IP.
+ * @param xp_port  X-Plane receive port (default 49000).
+ * @return 0 on success, -1 on failure.
+ */
+int xplane_rref_subscribe_nd(UDPSocket* sock, const char* xp_host, int xp_port);
+
 #endif /* XPLANE_H */

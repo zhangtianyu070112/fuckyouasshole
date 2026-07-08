@@ -15,6 +15,8 @@
 #include <stdint.h>
 #include <SDL2/SDL.h>
 
+#include "../ds/spatial_hash.h"
+
 /* =========================================================================
  *  Basic geo types
  * ========================================================================= */
@@ -74,6 +76,19 @@ typedef struct {
     /* Longest runway length (ft), for reference */
     float    longest_runway_ft;
 } Airport;
+
+/* =========================================================================
+ *  Tower (ATC)
+ * ========================================================================= */
+
+typedef struct {
+    char     icao[8];          /* Associated airport ICAO */
+    char     name[64];         /* Tower name */
+    GeoPos   pos;
+    float    elevation_ft;
+    float    freq_mhz;         /* Tower frequency in MHz */
+    float    range_nm;         /* Service range in NM */
+} Tower;
 
 /* =========================================================================
  *  Route / flight plan
@@ -170,6 +185,9 @@ typedef struct FMCState {
     Airport        nav_airports[256];
     int            nav_apt_count;
 
+    /* Spatial hash — grid-based nav data (from earth_fix.dat / earth_nav.dat) */
+    SpatialHash*   spatial_hash;
+
     /* State */
     SDL_mutex*     mutex;
 } FMCState;
@@ -191,6 +209,18 @@ int       nav_database_init(FMCState* state);
 
 /** Find an airport by ICAO code (using binary search). Returns NULL if not found. */
 const Airport* nav_find_airport(const FMCState* state, const char* icao);
+
+/**
+ * @brief Load navigation data from earth_fix.dat and earth_nav.dat
+ *        into the spatial hash grid for efficient nearby queries.
+ *
+ * Must be called after nav_database_init(). Uses heap allocation for
+ * all ~235k entries. The spatial hash is stored in state->spatial_hash.
+ *
+ * @param state  FMC state (spatial_hash pointer is set on success).
+ * @return 0 on success, -1 on error.
+ */
+int       nav_database_load_files(FMCState* state);
 
 /* Thread-safe flight plan access */
 void      fmc_state_lock(FMCState* s);

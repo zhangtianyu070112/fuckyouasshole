@@ -7,6 +7,7 @@
  */
 
 #include "navdata.h"
+#include "../ds/spatial_hash.h"
 #include "utils/logger.h"
 
 #include <stdlib.h>
@@ -351,6 +352,218 @@ int nav_database_init(FMCState* state)
 }
 
 /* =========================================================================
+ *  File-based nav data loading (earth_fix.dat + earth_nav.dat)
+ * ========================================================================= */
+
+/**
+ * @brief Parse one line from earth_fix.dat and insert into spatial hash.
+ *
+ * Format: lat lon ident type FIR full_type
+ * Example: " 33.492513889    9.217400000  07EBA ENRT DT 2118994"
+ */
+static int parse_fix_line(const char* line, SpatialHash* sh)
+{
+    double lat = 0.0, lon = 0.0;
+    char ident[16] = {0};
+    char wpt_type[8] = {0};
+    char fir[8] = {0};
+    char full_type[16] = {0};
+
+    /* Try sscanf — skip blank lines and comments */
+    if (line[0] == '\0' || line[0] == '\n' || line[0] == '\r' || line[0] == '#')
+        return 0;
+
+    int n = sscanf(line, "%lf %lf %15s %7s %7s %15s",
+                   &lat, &lon, ident, wpt_type, fir, full_type);
+    if (n < 3) return 0;  /* Need at least lat, lon, ident */
+
+    /* Basic sanity — valid lat/lon range */
+    if (lat < -90.0 || lat > 90.0 || lon < -180.0 || lon > 180.0) return 0;
+
+    NavSpatialEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    strncpy(entry.ident, ident, sizeof(entry.ident) - 1);
+    entry.lat_deg = lat;
+    entry.lon_deg = lon;
+    entry.type = NAV_WAYPOINT;
+    entry.elevation_ft = 0.0f;
+    entry.freq_khz = 0.0f;
+
+    /* Type-based classification */
+    if (strcmp(wpt_type, "ENRT") == 0) {
+        entry.type = NAV_WAYPOINT;
+    }
+
+    spatial_hash_insert(sh, &entry);
+    return 1;
+}
+
+/**
+ * @brief Parse one line from earth_nav.dat and insert into spatial hash.
+ *
+ * Format: record_type lat lon elev_ft freq_khz freq_range mag_var | ident name fir unused facility_type
+ * Example: " 3   9.037802778    7.285102778     1191    11630   130     -2.000  ABC ENRT DN ABUJA VOR/DME"
+ *
+ * Record types:
+ *   2  = NDB
+ *   3  = VOR
+ *   4  = Intersection / Fix
+ *   11 = DME (standalone)
+ *   12 = DME component of VOR/DME
+ *   16 = Airport-related
+ *   17 = Airport-related
+ */
+static int parse_nav_line(const char* line, SpatialHash* sh)
+{
+    /* Skip header lines */
+    if (line[0] == 'I' || line[0] == '\0' || line[0] == '\n'
+        || line[0] == '\r' || line[0] == ' ')
+    {
+        /* Check if it's a header line starting with "I" followed by numbers */
+        if (line[0] == 'I') {
+            /* "I\n" or "I " → header; but if it's "I" followed by digits it's data */
+            return 0;  /* Skip all I-lines — they are version headers */
+        }
+        if (line[0] == ' ') return 0;  /* Blank-looking line */
+    }
+
+    int rec_type = 0;
+    double lat = 0.0, lon = 0.0;
+    int elev_ft = 0;
+    int freq_khz = 0;
+    int freq_range = 0;
+    double mag_var = 0.0;
+    char ident[16] = {0};
+    char name[64] = {0};
+    char facility[64] = {0};
+
+    /* Parse: rec_type lat lon elev freq freq_range mag_var | ident name fir unused facility... */
+    char pipe_part[256] = {0};
+
+    /* Try to find the pipe separator */
+    const char* pipe = strchr(line, '|');
+    int before_count;
+    if (pipe) {
+        /* Parse before-pipe part */
+        before_count = sscanf(line, "%d %lf %lf %d %d %d %lf",
+                              &rec_type, &lat, &lon, &elev_ft,
+                              &freq_khz, &freq_range, &mag_var);
+        /* Parse after-pipe part */
+        char pipe_part[256] = {0};
+        size_t pipe_len = strlen(pipe + 1);
+        if (pipe_len >= sizeof(pipe_part)) pipe_len = sizeof(pipe_part) - 1;
+        memcpy(pipe_part, pipe + 1, pipe_len);
+        pipe_part[pipe_len] = '\0';
+
+        sscanf(pipe_part, "%15s %63[^\n]", ident, facility);
+        /* Build name from facility text */
+        strncpy(name, facility, sizeof(name) - 1);
+    } else {
+        /* No pipe — try fixed-width or simpler format */
+        before_count = sscanf(line, "%d %lf %lf %d %d %d %lf %15s %63[^\n]",
+                              &rec_type, &lat, &lon, &elev_ft,
+                              &freq_khz, &freq_range, &mag_var,
+                              ident, facility);
+        strncpy(name, facility, sizeof(name) - 1);
+    }
+
+    /* Basic sanity */
+    if (lat < -90.0 || lat > 90.0 || lon < -180.0 || lon > 180.0) return 0;
+    if (before_count < 3) return 0;  /* Need at least type, lat, lon */
+
+    NavSpatialEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    strncpy(entry.ident, ident, sizeof(entry.ident) - 1);
+    strncpy(entry.name, name, sizeof(entry.name) - 1);
+    entry.lat_deg = lat;
+    entry.lon_deg = lon;
+    entry.elevation_ft = (float)elev_ft;
+    entry.freq_khz = (float)freq_khz;
+    entry.mag_var_deg = (float)mag_var;
+
+    /* Classify by record type */
+    switch (rec_type) {
+        case 2:
+            entry.type = NAV_NDB;
+            break;
+        case 3:
+            entry.type = NAV_VOR;
+            break;
+        case 4:
+        case 11:
+        case 12:
+            entry.type = NAV_WAYPOINT;
+            break;
+        case 16:
+        case 17:
+            entry.type = NAV_AIRPORT;
+            break;
+        default:
+            entry.type = NAV_WAYPOINT;
+            break;
+    }
+
+    spatial_hash_insert(sh, &entry);
+    return 1;
+}
+
+int nav_database_load_files(FMCState* state)
+{
+    if (!state) return -1;
+
+    /* Create spatial hash with 2003 buckets (good for ~235k entries) */
+    SpatialHash* sh = spatial_hash_create(2003);
+    if (!sh) {
+        LOG_ERROR("Failed to create spatial hash");
+        return -1;
+    }
+
+    int fix_count = 0;
+    int nav_count = 0;
+
+    /* --- Parse earth_fix.dat --- */
+    {
+        FILE* f = fopen("assets/assets/earth_fix.dat", "r");
+        if (!f) {
+            LOG_WARN("Cannot open assets/assets/earth_fix.dat — skipping waypoints");
+        } else {
+            char line[256];
+            while (fgets(line, sizeof(line), f)) {
+                /* Strip trailing newline */
+                line[strcspn(line, "\r\n")] = '\0';
+                if (parse_fix_line(line, sh)) fix_count++;
+            }
+            fclose(f);
+            LOG_INFO("earth_fix.dat: %d waypoints loaded", fix_count);
+        }
+    }
+
+    /* --- Parse earth_nav.dat --- */
+    {
+        FILE* f = fopen("assets/assets/earth_nav.dat", "r");
+        if (!f) {
+            LOG_WARN("Cannot open assets/assets/earth_nav.dat — skipping navaids");
+        } else {
+            char line[512];
+            while (fgets(line, sizeof(line), f)) {
+                /* Strip trailing newline */
+                line[strcspn(line, "\r\n")] = '\0';
+                if (parse_nav_line(line, sh)) nav_count++;
+            }
+            fclose(f);
+            LOG_INFO("earth_nav.dat: %d navaids loaded", nav_count);
+        }
+    }
+
+    LOG_INFO("Spatial hash total: %d entries (%d fix + %d nav) in %d grid cells",
+             sh->total_entries, fix_count, nav_count,
+             sh->grid_map ? sh->grid_map->size : 0);
+
+    state->spatial_hash = sh;
+    return 0;
+}
+
+/* =========================================================================
  *  FMC State
  * ========================================================================= */
 
@@ -376,6 +589,10 @@ FMCState* fmc_state_create(void)
 void fmc_state_free(FMCState* state)
 {
     if (!state) return;
+    if (state->spatial_hash) {
+        spatial_hash_destroy(state->spatial_hash);
+        state->spatial_hash = NULL;
+    }
     if (state->mutex) SDL_DestroyMutex(state->mutex);
     free(state);
 }

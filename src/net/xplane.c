@@ -748,6 +748,12 @@ int xplane_parse_rref(const uint8_t* data, int len, FlightData* fd)
     case 22: fd->current.dref_hyd_press_psi[1] = value; break;
     case 23: fd->current.dref_hyd_qty_pct[0]   = value; break;
     case 24: fd->current.dref_hyd_qty_pct[1]   = value; break;
+    /* ND-specific DREF values (indices 30-34) */
+    case XP_RREF_ND_LAT:     fd->current.dref_nd_lat          = value; fd->current.dref_nd_valid |= 0x01; break;
+    case XP_RREF_ND_LON:     fd->current.dref_nd_lon          = value; fd->current.dref_nd_valid |= 0x02; break;
+    case XP_RREF_ND_MAG_PSI: fd->current.dref_nd_mag_psi      = value; fd->current.dref_nd_valid |= 0x04; break;
+    case XP_RREF_ND_TAS:     fd->current.dref_nd_true_airspeed = value; fd->current.dref_nd_valid |= 0x08; break;
+    case XP_RREF_ND_GS:      fd->current.dref_nd_groundspeed   = value; fd->current.dref_nd_valid |= 0x10; break;
     default: break;
     }
 
@@ -810,5 +816,36 @@ int xplane_rref_subscribe_all(UDPSocket* sock, const char* xp_host, int xp_port)
     }
 
     LOG_INFO("RREF subscribed %d/%d alert datarefs", ok, num_subs);
+    return (ok > 0) ? 0 : -1;
+}
+
+/* =========================================================================
+ *  ND-specific RREF subscriptions
+ * ========================================================================= */
+
+int xplane_rref_subscribe_nd(UDPSocket* sock, const char* xp_host, int xp_port)
+{
+    if (!sock || !xp_host) return -1;
+
+    struct { int id; const char* path; int freq; } subs[] = {
+        { XP_RREF_ND_LAT,     "sim/flightmodel/position/latitude",       4 },
+        { XP_RREF_ND_LON,     "sim/flightmodel/position/longitude",      4 },
+        { XP_RREF_ND_MAG_PSI, "sim/flightmodel/position/mag_psi",        4 },
+        { XP_RREF_ND_TAS,     "sim/flightmodel/position/true_airspeed",  4 },
+        { XP_RREF_ND_GS,      "sim/flightmodel/position/groundspeed",    4 },
+    };
+
+    int num_subs = (int)(sizeof(subs) / sizeof(subs[0]));
+    int ok = 0;
+
+    for (int i = 0; i < num_subs; i++) {
+        if (xplane_rref_subscribe(sock, xp_host, xp_port,
+                                  subs[i].path, subs[i].id, subs[i].freq) == 0) {
+            ok++;
+        }
+        SDL_Delay(10);
+    }
+
+    LOG_INFO("RREF ND: %d/%d datarefs subscribed", ok, num_subs);
     return (ok > 0) ? 0 : -1;
 }

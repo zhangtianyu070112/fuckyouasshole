@@ -21,6 +21,7 @@
 #include "instruments/eicas2.h"
 #include "data/flight_data.h"
 #include "data/navdata.h"
+#include "ds/spatial_hash.h"
 #include "net/udp.h"
 #include "net/xplane.h"
 #include "net/mock_data.h"
@@ -507,6 +508,9 @@ static int start_data_source(App* app)
          * Data comes back on the receive port (recv_port), parsed by
          * xplane_parse_rref() in the UDP receive thread. */
         xplane_rref_subscribe_all(app->xp_send_sock, host, cmd_port);
+
+        /* Subscribe to ND-specific DREFs (position, heading, speed) */
+        xplane_rref_subscribe_nd(app->xp_send_sock, host, cmd_port);
     } else {
         LOG_WARN("Failed to create X-Plane send socket — DREF disabled");
     }
@@ -916,17 +920,17 @@ static int instrument_event_bridge(const SDL_Event* event, void* userdata)
                 SDL_Event local_event = *event;
                 if (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_MOUSEBUTTONUP || event->type == SDL_MOUSEMOTION) {
                     SDL_Rect phys = app->instrument_base_rects[i];
-                    
+
                     int native_w = 772;
                     int native_h = 721;
                     if (inst->name && strstr(inst->name, "FMC")) {
                         native_w = 643;
                         native_h = 992;
                     }
-                    
+
                     float scale_x = (float)native_w / (float)phys.w;
                     float scale_y = (float)native_h / (float)phys.h;
-                    
+
                     if (event->type == SDL_MOUSEMOTION) {
                         local_event.motion.x = (Sint32)((event->motion.x - phys.x) * scale_x);
                         local_event.motion.y = (Sint32)((event->motion.y - phys.y) * scale_y);
@@ -935,7 +939,8 @@ static int instrument_event_bridge(const SDL_Event* event, void* userdata)
                         local_event.button.y = (Sint32)((event->button.y - phys.y) * scale_y);
                     }
                 }
-                if (inst->on_event(inst, &local_event)) {
+                int consumed = inst->on_event(inst, &local_event);
+                if (consumed) {
                     return 1;  /* Consumed by this instrument */
                 }
             }
@@ -1012,6 +1017,12 @@ int app_run_with_config(const char* config_path)
         nav_database_init(app->fmc_state);
         fprintf(stderr, "[STARTUP] Nav DB: %d airports, %d waypoints\n",
                 app->fmc_state->nav_apt_count, app->fmc_state->nav_wpt_count);
+
+        /* Load spatial hash from earth_fix.dat / earth_nav.dat */
+        nav_database_load_files(app->fmc_state);
+        fprintf(stderr, "[STARTUP] Spatial hash: %d entries loaded\n",
+                app->fmc_state->spatial_hash ?
+                app->fmc_state->spatial_hash->total_entries : 0);
     }
 
     /* 7. Create instruments */
@@ -1022,7 +1033,7 @@ int app_run_with_config(const char* config_path)
     layout_instruments(app);
     init_instruments(app);
 
-    /* Register instrument event bridge — routes unconsumed events to instruments.
+    /* Register instrument event bridge — routes events to instruments.
      * Registered AFTER quit handler so ESC/QUIT still work first. */
     eventsys_register(app->events, instrument_event_bridge, app, SDL_FIRSTEVENT);
 

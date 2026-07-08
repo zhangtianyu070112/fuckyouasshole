@@ -367,10 +367,18 @@ static void build_legs_page(FMCData* d)
                                                    fp->waypoints[j].pos);
             }
 
+            /* Compute course to next waypoint */
+            float leg_crs = 0.0f;
+            if (idx + 1 < count) {
+                leg_crs = (float)geo_bearing_deg(fp->waypoints[idx].pos,
+                                                  fp->waypoints[idx + 1].pos);
+            }
+
             snprintf(d->display[i * 2], 25, "                       ");
-            snprintf(d->display[i * 2 + 1], 25, "%c%-7s %6.0f NM      ",
+            snprintf(d->display[i * 2 + 1], 25, "%c%-5s %5.0f° %4.0f NM ",
                      is_active ? '>' : ' ',
                      w->ident[0] ? w->ident : "......",
+                     (double)leg_crs,
                      (double)cum_dist);
         }
     }
@@ -687,15 +695,33 @@ static void rte_activate(FMCData* d)
 
     d->legs_scroll = 0;
 
+    /* Compute initial course */
     {
+        double init_crs = 0.0;
+        if (fp->waypoint_count >= 2) {
+            init_crs = geo_bearing_deg(fp->waypoints[0].pos,
+                                        fp->waypoints[1].pos);
+        }
+
         char buf[64];
-        snprintf(buf, sizeof(buf), "ROUTE OK %d WP %.0f NM",
-                 path.waypoint_count, (double)path.total_distance_nm);
+        snprintf(buf, sizeof(buf), "ROUTE OK %d WP %.0f NM CRS %.0f°",
+                 path.waypoint_count, (double)path.total_distance_nm, init_crs);
         set_message(d, buf);
     }
 
     LOG_INFO("FMC: route activated %s→%s, %d WP, %.0f NM",
              orig, dest, path.waypoint_count, (double)path.total_distance_nm);
+
+    /* Log each leg's course */
+    for (int i = 0; i < fp->waypoint_count - 1; i++) {
+        double crs = geo_bearing_deg(fp->waypoints[i].pos,
+                                      fp->waypoints[i + 1].pos);
+        LOG_DEBUG("  Leg %d: %s → %s  CRS %.0f°",
+                  i + 1,
+                  fp->waypoints[i].ident,
+                  fp->waypoints[i + 1].ident,
+                  crs);
+    }
 
     /* Sync flight plan to X-Plane autopilot via native DREF */
     if (d->app) {
@@ -1853,29 +1879,6 @@ static int fmc_on_event(Instrument* self, const SDL_Event* ev)
             return 1;
         }
 
-        /* Alphanumeric entry */
-        char ch = '\0';
-        if (key >= SDLK_a && key <= SDLK_z)       ch = (char)('A' + (key - SDLK_a));
-        else if (key >= SDLK_0 && key <= SDLK_9)   ch = (char)('0' + (key - SDLK_0));
-        else if (key == SDLK_SPACE)                ch = ' ';
-        else if (key == SDLK_PERIOD)               ch = '.';
-        else if (key == SDLK_SLASH)                ch = '/';
-        else if (key == SDLK_MINUS)                ch = '-';
-
-        if (ch && slen < MAX_SCRATCHPAD) {
-            d->scratchpad[slen]     = ch;
-            d->scratchpad[slen + 1] = '\0';
-            /* Forward alphanumeric/symbol to X-Plane FMC */
-            {
-                char lbl[2] = {ch, '\0'};
-                if (ch == ' ')      xp_forward_cdu_key(d, "SP");
-                else if (ch == '/') xp_forward_cdu_key(d, "/");
-                else if (ch == '.') xp_forward_cdu_key(d, ".");
-                else if (ch == '-') xp_forward_cdu_key(d, "+/-");
-                else                xp_forward_cdu_key(d, lbl);
-            }
-            return 1;
-        }
     }
 
     return 0;  /* Not consumed */

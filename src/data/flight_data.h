@@ -141,6 +141,14 @@ typedef struct FlightDataValues {
 
     /* --- DREF alert state bits (populated by RREF, 1-4 Hz) --- */
     int   dref_bank_angle;        /* sim/cockpit/warnings/annunciators/bank_angle */
+
+    /* --- ND-specific DREF values (populated by ND RREF subscriptions) --- */
+    float dref_nd_lat;            /* sim/flightmodel/position/latitude (float, degrees) */
+    float dref_nd_lon;            /* sim/flightmodel/position/longitude (float, degrees) */
+    float dref_nd_mag_psi;        /* sim/flightmodel/position/mag_psi (float, degrees) */
+    float dref_nd_true_airspeed;  /* sim/flightmodel/position/true_airspeed (float, m/s) */
+    float dref_nd_groundspeed;    /* sim/flightmodel/position/groundspeed (float, m/s) */
+    int   dref_nd_valid;          /* Bitmask: 0x01=lat, 0x02=lon, 0x04=hdg, 0x08=tas, 0x10=gs */
     int   dref_stall_warning;     /* sim/cockpit/warnings/annunciators/stall_warning */
     int   dref_gear_warning;      /* sim/cockpit/warnings/annunciators/gear_warning */
     int   dref_gpws;              /* sim/cockpit/warnings/annunciators/GPWS */
