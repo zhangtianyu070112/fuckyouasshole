@@ -3,10 +3,10 @@
 
 int main() {
     FILE* f = fopen("location-FMC.json", "r");
-    if (!f) return 1;
+    if (!f) { printf("Failed to open\n"); return 1; }
     char line[512];
     int in_screen = 0;
-    int button_count = 0;
+    int count = 0;
     while (fgets(line, sizeof(line), f)) {
         char* label_ptr = strstr(line, "\"label\"");
         char* bbox_ptr = strstr(line, "\"bbox\"");
@@ -29,10 +29,12 @@ int main() {
                 }
             }
             int ret = sscanf(bbox_ptr, "\"bbox\": [%f, %f, %f, %f]", &x1, &y1, &x2, &y2);
-            printf("Parsed %s: %f %f %f %f (ret=%d)\n", label, x1, y1, x2, y2, ret);
-            button_count++;
+            if (strncmp(label, "LSK_", 4) == 0 && label[5] == 'L') {
+                printf("%s: %f %f\n", label, y1, y2);
+            }
+            count++;
         }
     }
-    printf("Total buttons: %d\n", button_count);
+    printf("Total: %d\n", count);
     return 0;
 }

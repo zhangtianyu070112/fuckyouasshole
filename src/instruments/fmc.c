@@ -232,17 +232,18 @@ static void build_ident_page(FMCData* d)
 {
     memset(d->display, ' ', sizeof(d->display));
 
-    snprintf(d->display[0], 25, " FMC-CDU  VER 2.0      ");
-    snprintf(d->display[2], 25, " MODEL   B738          ");
-    snprintf(d->display[3], 25, " ENG     CFM56-7B26    ");
-    snprintf(d->display[5], 25, " NAV DATA              ");
-    snprintf(d->display[6], 25, " %04d WAYPOINTS         ",
-             d->fmc ? d->fmc->nav_wpt_count : 0);
-    snprintf(d->display[7], 25, " %04d AIRPORTS          ",
-             d->fmc ? d->fmc->nav_apt_count : 0);
-    snprintf(d->display[8], 25, " %04d GRAPH NODES       ",
-             d->graph ? d->graph->node_count : 0);
-    snprintf(d->display[10], 25, " <IDENT               ");
+    snprintf(d->display[0], 25, " MODEL                 ");
+    snprintf(d->display[1], 25, " B738                  ");
+    snprintf(d->display[2], 25, " ENG                   ");
+    snprintf(d->display[3], 25, " CFM56-7B26            ");
+    snprintf(d->display[4], 25, " NAV DATA              ");
+    snprintf(d->display[5], 25, " %04d WAYPOINTS         ", d->fmc ? d->fmc->nav_wpt_count : 0);
+    snprintf(d->display[6], 25, "                       ");
+    snprintf(d->display[7], 25, " %04d AIRPORTS          ", d->fmc ? d->fmc->nav_apt_count : 0);
+    snprintf(d->display[8], 25, "                       ");
+    snprintf(d->display[9], 25, " %04d GRAPH NODES       ", d->graph ? d->graph->node_count : 0);
+    snprintf(d->display[10], 25, "                       ");
+    snprintf(d->display[11], 25, " <IDENT                ");
 
     for (int i = 0; i < 12; i++) d->display[i][24] = '\0';
 }
@@ -250,34 +251,32 @@ static void build_ident_page(FMCData* d)
 static void build_rte_page(FMCData* d)
 {
     memset(d->display, ' ', sizeof(d->display));
-
     FlightPlan* fp = d->fmc ? &d->fmc->flight_plan : NULL;
 
-    snprintf(d->display[0], 25, " RTE            1/5    ");
-
-    /* L1: ORIGIN */
-    snprintf(d->display[1], 25, " ORIGIN  %-8s     <L1  ",
-             (fp && fp->departure.icao[0]) ? fp->departure.icao : "----");
-    /* R1: DEST */
-    snprintf(d->display[2], 25, " DEST    %-8s      R1> ",
+    snprintf(d->display[0], 25, " ORIGIN          DEST  ");
+    snprintf(d->display[1], 25, " %-8s        %-8s ",
+             (fp && fp->departure.icao[0]) ? fp->departure.icao : "----",
              (fp && fp->arrival.icao[0]) ? fp->arrival.icao : "----");
-    /* L2: FLT NO */
-    snprintf(d->display[3], 25, " FLT NO  %-8s     <L2  ",
-             (fp && fp->flight_number[0]) ? fp->flight_number : "----");
-    /* R2: ALT (informational — shows on PERF page) */
-    snprintf(d->display[4], 25, " CRZ ALT %05.0f FT  R2> ",
-             fp ? (double)fp->cruise_altitude_ft : 35000.0);
 
-    /* Stats */
-    snprintf(d->display[6], 25, " WPT: %03d  DIST: %6.0f  ",
+    snprintf(d->display[2], 25, " FLT NO        CRZ ALT ");
+    snprintf(d->display[3], 25, " %-8s      FL%03d   ",
+             (fp && fp->flight_number[0]) ? fp->flight_number : "----",
+             fp ? (int)(fp->cruise_altitude_ft / 100) : 350);
+
+    snprintf(d->display[4], 25, "                       ");
+    snprintf(d->display[5], 25, "                       ");
+
+    snprintf(d->display[6], 25, "                       ");
+    snprintf(d->display[7], 25, " WPT: %03d  DIST: %4.0f ",
              fp ? fp->waypoint_count : 0,
              fp ? (double)fp->total_distance_nm : 0.0);
-    snprintf(d->display[7], 25, " ETE: %4.1f HR          ",
+
+    snprintf(d->display[8], 25, "                       ");
+    snprintf(d->display[9], 25, " ETE: %4.1f HR          ",
              fp ? (double)fp->estimated_time_hours : 0.0);
 
-    /* L6: RTE page nav, R6: ACTIVATE */
-    snprintf(d->display[10], 25, " <RTE                  ");
-    snprintf(d->display[11], 25, "                ACTIV> ");
+    snprintf(d->display[10], 25, "                       ");
+    snprintf(d->display[11], 25, " <RTE           ACTIV> ");
 
     for (int i = 0; i < 12; i++) d->display[i][24] = '\0';
 }
@@ -324,19 +323,20 @@ static void build_legs_page(FMCData* d)
     int count = fp ? fp->waypoint_count : 0;
     const char* mode_str = d->legs_sort_mode ? "ALPHA" : "RTE";
 
-    snprintf(d->display[0], 25, " LEGS %s    %3d WP    ", mode_str, count);
-
     if (count == 0) {
+        snprintf(d->display[2], 25, "                       ");
         snprintf(d->display[3], 25, "  -- NO ROUTE --       ");
+        snprintf(d->display[4], 25, "                       ");
         snprintf(d->display[5], 25, "  USE RTE PAGE TO      ");
-        snprintf(d->display[6], 25, "  ENTER ROUTE          ");
+        snprintf(d->display[6], 25, "                       ");
+        snprintf(d->display[7], 25, "  ENTER ROUTE          ");
     } else if (d->legs_sort_mode) {
         /* Alphabetical order via AVL tree */
         rebuild_wpt_tree(d);
         WptCollector col = {{NULL}, 0};
         avl_inorder(d->wpt_tree, collect_wpt, &col);
 
-        int max_show = 10;
+        int max_show = 5;
         int start = d->legs_scroll;
         if (start > col.count - max_show) start = col.count - max_show;
         if (start < 0) start = 0;
@@ -345,12 +345,13 @@ static void build_legs_page(FMCData* d)
             const Waypoint* w = col.wpts[start + i];
             int is_active = (fp->active_waypoint_index >= 0 &&
                 &fp->waypoints[fp->active_waypoint_index] == w);
-            snprintf(d->display[i + 1], 25, "%c%-8s              ",
+            snprintf(d->display[i * 2], 25, "                       ");
+            snprintf(d->display[i * 2 + 1], 25, "%c%-8s              ",
                      is_active ? '>' : ' ', w->ident[0] ? w->ident : "......");
         }
     } else {
         /* Route order — iterate array directly */
-        int max_show = 10;
+        int max_show = 5;
         int start = d->legs_scroll;
         if (start > count - max_show) start = count - max_show;
         if (start < 0) start = 0;
@@ -366,7 +367,8 @@ static void build_legs_page(FMCData* d)
                                                    fp->waypoints[j].pos);
             }
 
-            snprintf(d->display[i + 1], 25, "%c%-7s %6.0f NM      ",
+            snprintf(d->display[i * 2], 25, "                       ");
+            snprintf(d->display[i * 2 + 1], 25, "%c%-7s %6.0f NM      ",
                      is_active ? '>' : ' ',
                      w->ident[0] ? w->ident : "......",
                      (double)cum_dist);
@@ -374,7 +376,8 @@ static void build_legs_page(FMCData* d)
     }
 
     /* Navigation hints */
-    if (count > 10) {
+    snprintf(d->display[10], 25, "                       ");
+    if (count > 5) {
         snprintf(d->display[11], 25, " <PG UP  PG DN  SORT> ");
     } else {
         snprintf(d->display[11], 25, " <LEGS          SORT> ");
@@ -389,24 +392,20 @@ static void build_perf_page(FMCData* d)
 
     FlightPlan* fp = d->fmc ? &d->fmc->flight_plan : NULL;
 
-    snprintf(d->display[0], 25, " PERF INIT       3/5    ");
-    snprintf(d->display[1], 25, " CRZ ALT %05.0f FT      ",
-             fp ? (double)fp->cruise_altitude_ft : 35000.0);
-    snprintf(d->display[2], 25, " CRZ SPD %03.0f KT      ",
+    snprintf(d->display[0], 25, " GW            CRZ ALT ");
+    snprintf(d->display[1], 25, " 140.0         FL%03d   ",
+             fp ? (int)(fp->cruise_altitude_ft / 100) : 350);
+    snprintf(d->display[2], 25, " FUEL REQ      CRZ SPD ");
+    snprintf(d->display[3], 25, " %05.0f         %03.0f KT  ",
+             fp ? (double)fp->fuel_required_lbs : 0.0,
              fp ? (double)fp->cruise_speed_kts : 450.0);
-    snprintf(d->display[3], 25, " FUEL REQ %05.0f LBS    ",
-             fp ? (double)fp->fuel_required_lbs : 0.0);
-    snprintf(d->display[4], 25, " TOT DIST %.0f NM       ",
-             fp ? (double)fp->total_distance_nm : 0.0);
-    snprintf(d->display[5], 25, " CI      80             ");
-    snprintf(d->display[6], 25, " GW      140000 LBS     ");
-    snprintf(d->display[7], 25, " RESV    5000 LBS       ");
-
-    if (d->graph) {
-        snprintf(d->display[9], 25, " GRAPH: %d NODES       ",
-                 d->graph->node_count);
-    }
-
+    snprintf(d->display[4], 25, " ZFW                   ");
+    snprintf(d->display[5], 25, " 120.0                 ");
+    snprintf(d->display[6], 25, " RESERVES              ");
+    snprintf(d->display[7], 25, " 5.0                   ");
+    snprintf(d->display[8], 25, " COST INDEX            ");
+    snprintf(d->display[9], 25, " 80                    ");
+    snprintf(d->display[10], 25, "                       ");
     snprintf(d->display[11], 25, " <PERF                 ");
 
     for (int i = 0; i < 12; i++) d->display[i][24] = '\0';
@@ -418,34 +417,36 @@ static void build_prog_page(FMCData* d)
 
     FlightPlan* fp = d->fmc ? &d->fmc->flight_plan : NULL;
 
-    snprintf(d->display[0], 25, " PROGRESS        4/5    ");
-
     /* Distance To Go */
-    {
-        float dtg = fp ? fp->total_distance_nm : 0.0f;
-        int active = fp ? fp->active_waypoint_index : -1;
-        if (active >= 0 && active < fp->waypoint_count && fp->waypoint_count > 0) {
-            dtg = 0.0f;
-            for (int j = active; j < fp->waypoint_count - 1; j++) {
-                dtg += (float)geo_distance_nm(fp->waypoints[j].pos,
-                                              fp->waypoints[j + 1].pos);
-            }
+    float dtg = fp ? fp->total_distance_nm : 0.0f;
+    int active = fp ? fp->active_waypoint_index : -1;
+    if (active >= 0 && active < fp->waypoint_count && fp->waypoint_count > 0) {
+        dtg = 0.0f;
+        for (int j = active; j < fp->waypoint_count - 1; j++) {
+            dtg += (float)geo_distance_nm(fp->waypoints[j].pos,
+                                          fp->waypoints[j + 1].pos);
         }
-        snprintf(d->display[2], 25, " DTG    %.0f NM         ", (double)dtg);
     }
 
-    snprintf(d->display[3], 25, " ETA    %4.1f HR        ",
-             fp ? (double)fp->estimated_time_hours : 0.0);
-    snprintf(d->display[4], 25, " FUEL   %.0f LBS        ",
+    snprintf(d->display[0], 25, " TO            DTG     ");
+    snprintf(d->display[1], 25, " %-8s      %4.0f NM ", 
+             (fp && active >= 0 && active < fp->waypoint_count) ? fp->waypoints[active].ident : "----",
+             (double)dtg);
+    snprintf(d->display[2], 25, " ETA           FUEL    ");
+    snprintf(d->display[3], 25, " %4.1f HR      %.0f LBS ",
+             fp ? (double)fp->estimated_time_hours : 0.0,
              fp ? (double)fp->fuel_required_lbs : 0.0);
-    snprintf(d->display[6], 25, " GS     %.0f KT         ",
+    snprintf(d->display[4], 25, " WIND          GS      ");
+    snprintf(d->display[5], 25, " ---/--        %.0f KT  ",
              (double)d->smooth_gs);
-    snprintf(d->display[7], 25, " ALT    %.0f FT         ",
+    snprintf(d->display[6], 25, "               ALT     ");
+    snprintf(d->display[7], 25, "               %.0f FT  ",
              (double)d->smooth_alt);
-    snprintf(d->display[9], 25, " WPT    %d/%d           ",
+    snprintf(d->display[8], 25, " WPT           XTK     ");
+    snprintf(d->display[9], 25, " %d/%d           R 0.0   ",
              fp ? fp->active_waypoint_index + 1 : 0,
              fp ? fp->waypoint_count : 0);
-
+    snprintf(d->display[10], 25, "                       ");
     snprintf(d->display[11], 25, " <PROG                 ");
 
     for (int i = 0; i < 12; i++) d->display[i][24] = '\0';
@@ -458,25 +459,19 @@ static void build_radio_page(FMCData* d)
     FlightPlan* fp = d->fmc ? &d->fmc->flight_plan : NULL;
     (void)fp;
 
-    snprintf(d->display[0], 25, " RADIO            6/6    ");
-
-    /* COM1 */
-    snprintf(d->display[2], 25, " COM1  %06.3f          ",
-             d->smooth_gs > 0.0f ? 122.800 : 122.800);
-    /* COM2 */
-    snprintf(d->display[3], 25, " COM2  %06.3f          ",
-             121.500);
-    /* NAV1 */
-    snprintf(d->display[5], 25, " NAV1  %06.2f          ",
-             110.90);
-    /* NAV2 */
-    snprintf(d->display[6], 25, " NAV2  %06.2f          ",
-             113.70);
-    /* XPDR */
-    snprintf(d->display[8], 25, " XPDR  1200 ALT        ");
-    /* DME */
-    snprintf(d->display[9], 25, " DME   ---- NM         ");
-
+    snprintf(d->display[0], 25, " COM1          COM2    ");
+    snprintf(d->display[1], 25, " %06.3f        %06.3f ",
+             122.800, 121.500);
+    snprintf(d->display[2], 25, " NAV1          NAV2    ");
+    snprintf(d->display[3], 25, " %06.2f         %06.2f ",
+             110.90, 113.70);
+    snprintf(d->display[4], 25, " XPDR          DME     ");
+    snprintf(d->display[5], 25, " 1200 ALT      ---- NM ");
+    snprintf(d->display[6], 25, "                       ");
+    snprintf(d->display[7], 25, "                       ");
+    snprintf(d->display[8], 25, "                       ");
+    snprintf(d->display[9], 25, "                       ");
+    snprintf(d->display[10], 25, "                       ");
     snprintf(d->display[11], 25, " <RADIO                ");
 
     for (int i = 0; i < 12; i++) d->display[i][24] = '\0';
@@ -487,13 +482,13 @@ static void build_dep_arr_page(FMCData* d)
     memset(d->display, ' ', sizeof(d->display));
     FlightPlan* fp = d->fmc ? &d->fmc->flight_plan : NULL;
 
-    snprintf(d->display[0], 25, " DEP/ARR INDEX         ");
-    
-    snprintf(d->display[1], 25, " <DEP              ARR> ");
-    snprintf(d->display[2], 25, " %-8s          %-8s ", 
+    snprintf(d->display[0], 25, " DEP             ARR   ");
+    snprintf(d->display[1], 25, " <%-8s      %-8s> ", 
         (fp && fp->departure.icao[0]) ? fp->departure.icao : "----",
         (fp && fp->arrival.icao[0]) ? fp->arrival.icao : "----");
-    snprintf(d->display[3], 25, "                        ");
+
+    snprintf(d->display[2], 25, "                       ");
+    snprintf(d->display[3], 25, "                       ");
 
     /* Show current SID/STAR if any */
     snprintf(d->display[4], 25, " SID               STAR ");
@@ -506,6 +501,9 @@ static void build_dep_arr_page(FMCData* d)
         (fp && fp->sid.runway[0]) ? fp->sid.runway : "----",
         (fp && fp->star.runway[0]) ? fp->star.runway : "----");
 
+    snprintf(d->display[8], 25, "                       ");
+    snprintf(d->display[9], 25, "                       ");
+    snprintf(d->display[10], 25, "                       ");
     snprintf(d->display[11], 25, " <INDEX                ");
 
     for (int i = 0; i < 12; i++) d->display[i][24] = '\0';
@@ -516,19 +514,23 @@ static void build_clb_page(FMCData* d)
     memset(d->display, ' ', sizeof(d->display));
     FlightPlan* fp = d->fmc ? &d->fmc->flight_plan : NULL;
 
-    snprintf(d->display[0], 25, " ACT ECON CLB          ");
-    snprintf(d->display[1], 25, " CRZ ALT               ");
-    snprintf(d->display[2], 25, " FL%03d                 ", fp ? (int)(fp->cruise_altitude_ft / 100) : 350);
-    snprintf(d->display[3], 25, " TGT SPD               ");
-    snprintf(d->display[4], 25, " .%02d/%03d               ", 
+    snprintf(d->display[0], 25, "                       ");
+    snprintf(d->display[1], 25, "                       ");
+    snprintf(d->display[2], 25, " CRZ ALT               ");
+    snprintf(d->display[3], 25, " FL%03d                 ", fp ? (int)(fp->cruise_altitude_ft / 100) : 350);
+    snprintf(d->display[4], 25, " TGT SPD               ");
+    snprintf(d->display[5], 25, " .%02d/%03d               ", 
              fp ? (int)(fp->climb_tgt_spd_mach * 100) : 78,
              fp ? (int)fp->climb_tgt_spd_kts : 280);
     
-    snprintf(d->display[5], 25, " SPD REST              ");
-    snprintf(d->display[6], 25, " %03d/%05d             ", 
+    snprintf(d->display[6], 25, " SPD REST              ");
+    snprintf(d->display[7], 25, " %03d/%05d             ", 
              fp ? (int)fp->climb_spd_rest_kts : 250,
              fp ? (int)fp->climb_spd_rest_alt_ft : 10000);
 
+    snprintf(d->display[8], 25, "                       ");
+    snprintf(d->display[9], 25, "                       ");
+    snprintf(d->display[10], 25, "                       ");
     snprintf(d->display[11], 25, " <CLB                  ");
 
     for (int i = 0; i < 12; i++) d->display[i][24] = '\0';
@@ -539,15 +541,19 @@ static void build_crz_page(FMCData* d)
     memset(d->display, ' ', sizeof(d->display));
     FlightPlan* fp = d->fmc ? &d->fmc->flight_plan : NULL;
 
-    snprintf(d->display[0], 25, " ACT ECON CRZ          ");
-    snprintf(d->display[1], 25, " CRZ ALT               ");
-    snprintf(d->display[2], 25, " FL%03d                 ", fp ? (int)(fp->cruise_altitude_ft / 100) : 350);
-    snprintf(d->display[3], 25, " TGT SPD               ");
-    snprintf(d->display[4], 25, " M.%02d                  ", fp ? (int)(fp->cruise_tgt_spd_mach * 100) : 78);
+    snprintf(d->display[0], 25, "                       ");
+    snprintf(d->display[1], 25, "                       ");
+    snprintf(d->display[2], 25, " CRZ ALT               ");
+    snprintf(d->display[3], 25, " FL%03d                 ", fp ? (int)(fp->cruise_altitude_ft / 100) : 350);
+    snprintf(d->display[4], 25, " TGT SPD               ");
+    snprintf(d->display[5], 25, " M.%02d                  ", fp ? (int)(fp->cruise_tgt_spd_mach * 100) : 78);
     
-    snprintf(d->display[5], 25, " OPT/MAX               ");
-    snprintf(d->display[6], 25, " FL360/FL390           ");
+    snprintf(d->display[6], 25, " OPT/MAX               ");
+    snprintf(d->display[7], 25, " FL360/FL390           ");
 
+    snprintf(d->display[8], 25, "                       ");
+    snprintf(d->display[9], 25, "                       ");
+    snprintf(d->display[10], 25, "                       ");
     snprintf(d->display[11], 25, " <CRZ                  ");
 
     for (int i = 0; i < 12; i++) d->display[i][24] = '\0';
@@ -558,19 +564,23 @@ static void build_des_page(FMCData* d)
     memset(d->display, ' ', sizeof(d->display));
     FlightPlan* fp = d->fmc ? &d->fmc->flight_plan : NULL;
 
-    snprintf(d->display[0], 25, " ACT ECON DES          ");
-    snprintf(d->display[1], 25, " E/D ALT               ");
-    snprintf(d->display[2], 25, " %05d                 ", fp ? (int)fp->descent_ed_alt_ft : 10000);
-    snprintf(d->display[3], 25, " TGT SPD               ");
-    snprintf(d->display[4], 25, " .%02d/%03d               ", 
+    snprintf(d->display[0], 25, "                       ");
+    snprintf(d->display[1], 25, "                       ");
+    snprintf(d->display[2], 25, " E/D ALT               ");
+    snprintf(d->display[3], 25, " %05d                 ", fp ? (int)fp->descent_ed_alt_ft : 10000);
+    snprintf(d->display[4], 25, " TGT SPD               ");
+    snprintf(d->display[5], 25, " .%02d/%03d               ", 
              fp ? (int)(fp->descent_tgt_spd_mach * 100) : 78,
              fp ? (int)fp->descent_tgt_spd_kts : 280);
     
-    snprintf(d->display[5], 25, " SPD REST              ");
-    snprintf(d->display[6], 25, " %03d/%05d             ", 
+    snprintf(d->display[6], 25, " SPD REST              ");
+    snprintf(d->display[7], 25, " %03d/%05d             ", 
              fp ? (int)fp->descent_spd_rest_kts : 250,
              fp ? (int)fp->descent_spd_rest_alt_ft : 10000);
 
+    snprintf(d->display[8], 25, "                       ");
+    snprintf(d->display[9], 25, "                       ");
+    snprintf(d->display[10], 25, "                       ");
     snprintf(d->display[11], 25, " <DES                  ");
 
     for (int i = 0; i < 12; i++) d->display[i][24] = '\0';
@@ -618,31 +628,20 @@ static void rte_activate(FMCData* d)
 
     /* Verify both airports exist in the graph */
     if (fp->departure.pos.lat_deg == 0.0 && fp->departure.pos.lon_deg == 0.0) {
-        /* Search nav_airports for the origin */
-        int found = 0;
-        for (int i = 0; i < d->fmc->nav_apt_count; i++) {
-            if (strcmp(d->fmc->nav_airports[i].icao, orig) == 0) {
-                fp->departure = d->fmc->nav_airports[i];
-                found = 1;
-                break;
-            }
-        }
-        if (!found) {
+        const Airport* apt = nav_find_airport(d->fmc, orig);
+        if (apt) {
+            fp->departure = *apt;
+        } else {
             set_message(d, "ORIGIN NOT IN DATABASE");
             return;
         }
     }
 
     if (fp->arrival.pos.lat_deg == 0.0 && fp->arrival.pos.lon_deg == 0.0) {
-        int found = 0;
-        for (int i = 0; i < d->fmc->nav_apt_count; i++) {
-            if (strcmp(d->fmc->nav_airports[i].icao, dest) == 0) {
-                fp->arrival = d->fmc->nav_airports[i];
-                found = 1;
-                break;
-            }
-        }
-        if (!found) {
+        const Airport* apt = nav_find_airport(d->fmc, dest);
+        if (apt) {
+            fp->arrival = *apt;
+        } else {
             set_message(d, "DEST NOT IN DATABASE");
             return;
         }
@@ -1655,8 +1654,8 @@ static void fmc_on_render(Instrument* self, SDL_Renderer* renderer)
     int sh = (int)((d->screen_bbox.y2 - d->screen_bbox.y1) * rect->h);
 
     int line_h = sh / 14; // Slightly more lines to fit text nicely
-    int screen_top = sy + 4;
-    int screen_left = sx + 4;
+    int screen_top = rect->y + sy + 4;
+    int screen_left = rect->x + sx + 4;
 
     // Title bar
     set_col(renderer, COL_WHITE);
@@ -1666,17 +1665,42 @@ static void fmc_on_render(Instrument* self, SDL_Renderer* renderer)
     if (page_idx < 0) page_idx = 0;
     if (page_idx > 9) page_idx = 9;
     snprintf(page_title, sizeof(page_title), "%d/10 %s", page_idx + 1, page_names[page_idx]);
-    draw_text_simple(renderer, sx + sw - 40, screen_top + line_h/2, page_title, 0.6f);
-    draw_text_simple(renderer, sx + sw/2, screen_top + line_h/2, "FMC-CDU", 0.7f);
+    draw_text_simple(renderer, rect->x + sx + sw - 40, screen_top + line_h/2, page_title, 0.6f);
+    draw_text_simple(renderer, rect->x + sx + sw/2, screen_top + line_h/2, "FMC-CDU", 0.7f);
 
     /* Display lines */
+    /* Get actual LSK Y centers to align text perfectly */
+    float lsk_y_centers[6] = {0};
+    for (int i = 0; i < d->button_count; i++) {
+        if (strncmp(d->buttons[i].label, "LSK_", 4) == 0 && d->buttons[i].label[5] == 'L') {
+            int num = d->buttons[i].label[4] - '1';
+            if (num >= 0 && num < 6) {
+                lsk_y_centers[num] = (d->buttons[i].y1 + d->buttons[i].y2) / 2.0f;
+            }
+        }
+    }
+
+    /* Fallback centers if JSON is missing */
+    for (int i = 0; i < 6; i++) {
+        if (lsk_y_centers[i] == 0.0f) {
+            lsk_y_centers[i] = d->screen_bbox.y1 + ((float)(i + 1) / 7.0f) * (d->screen_bbox.y2 - d->screen_bbox.y1);
+        }
+    }
+
     for (int ln = 0; ln < 12; ln++) {
-        int y = screen_top + (ln + 1) * line_h + line_h / 2;
+        int lsk_idx = ln / 2;
+        int is_data = ln % 2;
+
+        int y = rect->y + (int)(lsk_y_centers[lsk_idx] * rect->h);
+        if (!is_data) {
+            y -= (int)(line_h * 0.65f); // Header line should be closer to its own data line
+        }
 
         /* Display text (monospaced, left-aligned for column alignment) */
         set_col(renderer, COL_WHITE);
+        float font_scale = is_data ? 0.55f : 0.45f; // Header is slightly smaller
         font_draw_scaled_aligned(renderer, screen_left, y, d->display[ln],
-                                 0.55f, FONT_MONO, FONT_ALIGN_LEFT);
+                                 font_scale, FONT_MONO, FONT_ALIGN_LEFT);
     }
 
     /* Scratchpad content */
@@ -1707,7 +1731,7 @@ static void fmc_on_render(Instrument* self, SDL_Renderer* renderer)
                            ((SDL_GetTicks() - m->timestamp) < MSG_TIMEOUT_MS);
                 if (show) {
                     set_col(renderer, COL_AMBER);
-                    draw_text_simple(renderer, sx + sw / 2, msg_y, m->text, 0.6f);
+                    draw_text_simple(renderer, rect->x + sx + sw / 2, msg_y, m->text, 0.6f);
                 }
             }
         }

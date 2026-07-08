@@ -598,13 +598,10 @@ static void main_loop(App* app)
         FlightDataValues snapshot;
         flight_data_snapshot(app->flight_data, &snapshot);
 
-        /* 3b. Alert system — use test mode for RREF verification.
-         *     Test mode: plays distinctive tones for ALL 39 alert types
-         *     (GPWS + system + DREF). Switch back to alert_system_update()
-         *     for production (GPWS-only with richer synthesis). */
+        /* Evaluate triggers & play audio based on flight data */
         if (app->alert_sys) {
-            /* alert_system_update(app->alert_sys, &snapshot, app->delta_time); */
-            alert_system_test_beeps(app->alert_sys, &snapshot);
+            alert_system_update(app->alert_sys, &snapshot, app->delta_time);
+            /* alert_system_test_beeps(app->alert_sys, &snapshot); */
         }
 
         /* 3c. Update Cabin Display Server */
@@ -1048,6 +1045,9 @@ int app_run_with_config(const char* config_path)
         }
     }
 
+    /* 8. Main loop - must be set BEFORE starting threads so they don't exit immediately */
+    app->running = 1;
+
     /* 8b. Data source (mock or UDP) */
     start_data_source(app);
     fprintf(stderr, "[STARTUP] 7/7 Entering main loop\n");
@@ -1056,7 +1056,6 @@ int app_run_with_config(const char* config_path)
     app->cabin_server = cabin_server_create(app->config, app->fmc_state);
 
     /* 9. Main loop */
-    app->running = 1;
     main_loop(app);
 
     ret = 0;  /* Clean exit */

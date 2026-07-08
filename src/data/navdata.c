@@ -87,6 +87,10 @@ GeoPos geo_offset(GeoPos start, double dist_nm, double bearing_deg)
     return result;
 }
 
+static int compare_airports(const void* a, const void* b) {
+    return strcmp(((const Airport*)a)->icao, ((const Airport*)b)->icao);
+}
+
 /* =========================================================================
  *  Navigation database — hardcoded Chinese airports & waypoints
  * ========================================================================= */
@@ -296,6 +300,9 @@ int nav_database_init(FMCState* state)
         a->longest_runway_ft = 10000.0f;
     }
     state->nav_apt_count = apt_n;
+    
+    /* Sort airports by ICAO for binary search */
+    qsort(state->nav_airports, state->nav_apt_count, sizeof(Airport), compare_airports);
 
     /* --- Waypoints on Chinese airways --- */
 
@@ -381,6 +388,16 @@ void fmc_state_lock(FMCState* s)
 void fmc_state_unlock(FMCState* s)
 {
     if (s && s->mutex) SDL_UnlockMutex(s->mutex);
+}
+
+const Airport* nav_find_airport(const FMCState* state, const char* icao) {
+    if (!state || !icao) return NULL;
+    Airport key;
+    strncpy(key.icao, icao, sizeof(key.icao) - 1);
+    key.icao[sizeof(key.icao) - 1] = '\0';
+    
+    Airport* result = (Airport*)bsearch(&key, state->nav_airports, state->nav_apt_count, sizeof(Airport), compare_airports);
+    return result;
 }
 
 /* --- Flight plan operations -------------------------------------------- */

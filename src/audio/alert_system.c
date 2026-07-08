@@ -929,14 +929,14 @@ static void evaluate_alerts(AlertSystem* as, const FlightDataValues* fd, float d
     /* --- 1. PULL UP (critical) --------------------------------------------
      * AGL < 100ft, sink rate > 2000 fpm, not in landing flare
      * OR: AGL < 50ft and still descending fast */
-    if (agl_ft < 100.0f && vs_fpm < -2000.0f && as->cooldown_timer[ALERT_PULL_UP] <= 0.0f) {
+    if (((agl_ft < 100.0f && vs_fpm < -2000.0f) || fd->dref_gpws) && as->cooldown_timer[ALERT_PULL_UP] <= 0.0f) {
         tone_start(as, ALERT_PULL_UP);
         as->cooldown_timer[ALERT_PULL_UP] = alert_cooldown[ALERT_PULL_UP];
         LOG_DEBUG("ALERT: PULL UP (AGL=%.0f, VS=%.0f)", (double)agl_ft, (double)vs_fpm);
     }
 
     /* --- Stall Warning ----------------------------------------------------- */
-    if (ias_kts < 110.0f && agl_ft > 0.0f && as->cooldown_timer[ALERT_STALL] <= 0.0f) {
+    if (((ias_kts < 110.0f && agl_ft > 0.0f) || fd->dref_stall_warning) && as->cooldown_timer[ALERT_STALL] <= 0.0f) {
         tone_start(as, ALERT_STALL);
         as->cooldown_timer[ALERT_STALL] = alert_cooldown[ALERT_STALL];
         LOG_DEBUG("ALERT: STALL (IAS=%.0f)", (double)ias_kts);
@@ -960,7 +960,7 @@ static void evaluate_alerts(AlertSystem* as, const FlightDataValues* fd, float d
      * Sudden IAS change > 20 kts in 1 second */
     as->ias_delta = ias_kts - as->last_ias_kts;
     as->last_ias_kts = ias_kts;
-    if (fabsf(as->ias_delta) > 20.0f && agl_ft < 2000.0f
+    if (((fabsf(as->ias_delta) > 20.0f && agl_ft < 2000.0f) || fd->dref_windshear)
         && as->cooldown_timer[ALERT_WINDSHEAR] <= 0.0f) {
         tone_start(as, ALERT_WINDSHEAR);
         as->cooldown_timer[ALERT_WINDSHEAR] = alert_cooldown[ALERT_WINDSHEAR];
@@ -1016,7 +1016,7 @@ static void evaluate_alerts(AlertSystem* as, const FlightDataValues* fd, float d
 
     /* --- 8. BANK ANGLE -----------------------------------------------------
      * |roll| > 35° below 2000ft AGL */
-    if (agl_ft < 2000.0f && fabsf(roll_deg) > 35.0f
+    if (((agl_ft < 2000.0f && fabsf(roll_deg) > 35.0f) || fd->dref_bank_angle)
         && as->cooldown_timer[ALERT_BANK_ANGLE] <= 0.0f) {
         tone_start(as, ALERT_BANK_ANGLE);
         as->cooldown_timer[ALERT_BANK_ANGLE] = alert_cooldown[ALERT_BANK_ANGLE];
@@ -1026,7 +1026,7 @@ static void evaluate_alerts(AlertSystem* as, const FlightDataValues* fd, float d
 
     /* --- 9. OVERSPEED ------------------------------------------------------
      * IAS > 340 kts (737-800 Vmo/Mmo equivalent) */
-    if (ias_kts > 340.0f && as->cooldown_timer[ALERT_OVERSPEED] <= 0.0f) {
+    if ((ias_kts > 340.0f || fd->dref_overspeed) && as->cooldown_timer[ALERT_OVERSPEED] <= 0.0f) {
         tone_start(as, ALERT_OVERSPEED);
         as->cooldown_timer[ALERT_OVERSPEED] = alert_cooldown[ALERT_OVERSPEED];
         LOG_DEBUG("ALERT: OVERSPEED (IAS=%.0f)", (double)ias_kts);

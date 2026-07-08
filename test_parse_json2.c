@@ -7,6 +7,7 @@ int main() {
     char line[512];
     int in_screen = 0;
     int button_count = 0;
+    float lsk_y_centers[6] = {0};
     while (fgets(line, sizeof(line), f)) {
         char* label_ptr = strstr(line, "\"label\"");
         char* bbox_ptr = strstr(line, "\"bbox\"");
@@ -17,7 +18,7 @@ int main() {
             in_screen = 0;
         } else if (label_ptr && bbox_ptr) {
             char label[32] = {0};
-            float x1=0, y1=0, x2=0, y2=0;
+            float x1, y1, x2, y2;
             char* val = strchr(label_ptr + 7, '"');
             if (val) {
                 val++;
@@ -28,11 +29,17 @@ int main() {
                     strncpy(label, val, len);
                 }
             }
-            int ret = sscanf(bbox_ptr, "\"bbox\": [%f, %f, %f, %f]", &x1, &y1, &x2, &y2);
-            printf("Parsed %s: %f %f %f %f (ret=%d)\n", label, x1, y1, x2, y2, ret);
+            sscanf(bbox_ptr, "\"bbox\": [%f, %f, %f, %f]", &x1, &y1, &x2, &y2);
+            if (strncmp(label, "LSK_", 4) == 0 && label[5] == 'L') {
+                int num = label[4] - '1';
+                if (num >= 0 && num < 6) {
+                    lsk_y_centers[num] = (y1 + y2) / 2.0f;
+                    printf("LSK_%dL center: %f\n", num+1, lsk_y_centers[num]);
+                }
+            }
             button_count++;
         }
     }
-    printf("Total buttons: %d\n", button_count);
+    fclose(f);
     return 0;
 }

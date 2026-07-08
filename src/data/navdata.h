@@ -189,6 +189,9 @@ void      fmc_state_free(FMCState* state);
  */
 int       nav_database_init(FMCState* state);
 
+/** Find an airport by ICAO code (using binary search). Returns NULL if not found. */
+const Airport* nav_find_airport(const FMCState* state, const char* icao);
+
 /* Thread-safe flight plan access */
 void      fmc_state_lock(FMCState* s);
 void      fmc_state_unlock(FMCState* s);
