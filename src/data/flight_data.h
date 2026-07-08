@@ -139,6 +139,33 @@ typedef struct FlightDataValues {
     int   master_warning;     /* Master warning light */
     int   master_caution;     /* Master caution light */
 
+    /* --- DREF alert state bits (populated by RREF, 1-4 Hz) --- */
+    int   dref_bank_angle;        /* sim/cockpit/warnings/annunciators/bank_angle */
+    int   dref_stall_warning;     /* sim/cockpit/warnings/annunciators/stall_warning */
+    int   dref_gear_warning;      /* sim/cockpit/warnings/annunciators/gear_warning */
+    int   dref_gpws;              /* sim/cockpit/warnings/annunciators/GPWS */
+    int   dref_overspeed;         /* sim/cockpit/warnings/annunciators/overspeed */
+    int   dref_windshear;         /* sim/cockpit/warnings/annunciators/windshear */
+    int   dref_ap_disconnect;     /* sim/cockpit/warnings/annunciators/autopilot_disconnect */
+    int   dref_engine_fire;       /* sim/cockpit/warnings/annunciators/engine_fire (index 0/1) */
+    int   dref_fire_warning;      /* sim/cockpit/warnings/annunciators/fire_warning */
+    int   dref_door;              /* sim/cockpit/warnings/annunciators/door */
+    int   dref_generator;         /* sim/cockpit/warnings/annunciators/generator */
+    int   dref_anti_ice;          /* sim/cockpit/warnings/annunciators/anti_ice */
+    int   dref_hyd_pressure;      /* sim/cockpit/warnings/annunciators/hydraulic_pressure */
+    int   dref_hyd_quantity;      /* sim/cockpit/warnings/annunciators/hydraulic_quantity */
+    int   dref_cabin_altitude;    /* sim/cockpit/warnings/annunciators/cabin_altitude */
+    int   dref_fuel_quantity;     /* sim/cockpit/warnings/annunciators/fuel_quantity */
+    int   dref_oil_pressure;      /* sim/cockpit/warnings/annunciators/oil_pressure */
+    int   dref_oil_temperature;   /* sim/cockpit/warnings/annunciators/oil_temperature */
+    int   dref_voltage;           /* sim/cockpit/warnings/annunciators/voltage */
+    int   dref_pressurization;    /* sim/cockpit/warnings/annunciators/pressurization */
+    int   dref_ice;               /* sim/cockpit/warnings/annunciators/ice */
+
+    /* --- DREF hydraulic values --- */
+    float dref_hyd_press_psi[2];  /* sim/cockpit2/hydraulics/indicators/hydraulic_pressure_psi[0..1] */
+    float dref_hyd_qty_pct[2];    /* sim/cockpit2/hydraulics/indicators/hydraulic_fluid_ratio[0..1] */
+
     /* --- Timestamp --- */
     uint64_t last_update_ticks;  /* SDL_GetTicks() when this was written */
 

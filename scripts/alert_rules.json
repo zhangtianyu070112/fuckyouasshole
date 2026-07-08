@@ -1,0 +1,313 @@
+{
+  "_description": "23 alert/system rule thresholds extracted from src/audio/alert_system.c and mock_data.c. Priority 0=highest.",
+
+  "alert_types": {
+    "PULL_UP": {
+      "priority": 0,
+      "cooldown_s": 2.5,
+      "conditions": {
+        "agl_ft": { "max": 100 },
+        "vs_fpm": { "max": -2000 }
+      },
+      "plausible_phases": ["DESCENT", "APPROACH", "LANDING"]
+    },
+
+    "WINDSHEAR": {
+      "priority": 1,
+      "cooldown_s": 2.0,
+      "conditions": {
+        "ias_delta_abs": { "min": 20 },
+        "agl_ft": { "max": 2000 }
+      },
+      "plausible_phases": ["TAKEOFF", "CLIMB1", "APPROACH", "LANDING"]
+    },
+
+    "MASTER_WARNING": {
+      "priority": 2,
+      "cooldown_s": 2.0,
+      "conditions": {
+        "master_warning": { "eq": 1 }
+      },
+      "plausible_phases": ["TAKEOFF", "CLIMB1", "CLIMB2", "CRUISE", "DESCENT", "APPROACH", "LANDING", "TAXI"]
+    },
+
+    "MASTER_CAUTION": {
+      "priority": 3,
+      "cooldown_s": 2.0,
+      "conditions": {
+        "master_caution": { "eq": 1 }
+      },
+      "plausible_phases": ["TAKEOFF", "CLIMB1", "CLIMB2", "CRUISE", "DESCENT", "APPROACH", "LANDING", "TAXI"]
+    },
+
+    "TERRAIN": {
+      "priority": 4,
+      "cooldown_s": 3.0,
+      "conditions": {
+        "agl_ft": { "min": 100, "max": 1000 },
+        "vs_fpm": { "max": -1500 }
+      },
+      "plausible_phases": ["DESCENT", "APPROACH"]
+    },
+
+    "SINK_RATE": {
+      "priority": 5,
+      "cooldown_s": 3.0,
+      "conditions": {
+        "agl_ft": { "min": 500, "max": 2500 },
+        "vs_fpm": { "max": -1500 }
+      },
+      "plausible_phases": ["DESCENT", "APPROACH"]
+    },
+
+    "TOO_LOW_GEAR": {
+      "priority": 6,
+      "cooldown_s": 2.0,
+      "conditions": {
+        "agl_ft": { "max": 500 },
+        "gear_deployed": { "eq": 0 },
+        "vs_fpm": { "max": -50 }
+      },
+      "plausible_phases": ["APPROACH", "LANDING"]
+    },
+
+    "TOO_LOW_FLAPS": {
+      "priority": 7,
+      "cooldown_s": 2.0,
+      "conditions": {
+        "agl_ft": { "max": 500 },
+        "flap_ratio": { "max": 0.25 },
+        "vs_fpm": { "max": -50 }
+      },
+      "plausible_phases": ["APPROACH", "LANDING"]
+    },
+
+    "GLIDESLOPE": {
+      "priority": 8,
+      "cooldown_s": 2.0,
+      "conditions": {
+        "agl_ft": { "max": 1000 },
+        "nav1_cdi_abs": { "min": 0.5 }
+      },
+      "plausible_phases": ["APPROACH"]
+    },
+
+    "BANK_ANGLE": {
+      "priority": 9,
+      "cooldown_s": 2.0,
+      "conditions": {
+        "agl_ft": { "max": 2000 },
+        "roll_deg_abs": { "min": 35 }
+      },
+      "plausible_phases": ["CLIMB1", "CLIMB2", "DESCENT", "APPROACH"]
+    },
+
+    "OVERSPEED": {
+      "priority": 10,
+      "cooldown_s": 1.5,
+      "conditions": {
+        "ias_kts": { "min": 340 }
+      },
+      "plausible_phases": ["CRUISE", "DESCENT"]
+    },
+
+    "STALL": {
+      "priority": 11,
+      "cooldown_s": 1.5,
+      "conditions": {
+        "ias_kts": { "max": 110 },
+        "agl_ft": { "min": 0 }
+      },
+      "plausible_phases": ["TAKEOFF", "CLIMB1", "APPROACH", "LANDING"]
+    },
+
+    "MINIMUMS": {
+      "priority": 12,
+      "cooldown_s": 5.0,
+      "conditions": {
+        "agl_ft": { "crossing_descend": 200 }
+      },
+      "plausible_phases": ["APPROACH"]
+    }
+  },
+
+  "_comment_altitude_callouts": "AGL thresholds (feet) that trigger altitude callouts during descent",
+  "altitude_callouts": [500, 400, 300, 200, 100, 50, 40, 30, 20, 10],
+
+  "system_rules": {
+    "ENG_OVERHEAT": {
+      "conditions": {
+        "egt_max_c": { "min": 850 }
+      },
+      "plausible_phases": ["TAKEOFF", "CLIMB1", "CLIMB2"]
+    },
+
+    "ENG_ASYM": {
+      "conditions": {
+        "n1_diff_pct": { "min": 5.0 }
+      },
+      "plausible_phases": ["TAKEOFF", "CLIMB1", "CLIMB2", "CRUISE", "DESCENT", "APPROACH", "LANDING"]
+    },
+
+    "FUEL_IMBALANCE": {
+      "conditions": {
+        "fuel_imbalance_lbs": { "min": 1000 }
+      },
+      "plausible_phases": ["CRUISE", "DESCENT"]
+    },
+
+    "OIL_PRESS_LOW": {
+      "conditions": {
+        "oil_press_min_psi": { "max": 25 }
+      },
+      "plausible_phases": ["TAKEOFF", "CLIMB1", "CLIMB2", "CRUISE", "DESCENT", "APPROACH"]
+    },
+
+    "CABIN_ALT_HIGH": {
+      "conditions": {
+        "cabin_alt_ft": { "min": 10000 }
+      },
+      "plausible_phases": ["CRUISE"]
+    },
+
+    "BUS_VOLT_ABNORM": {
+      "conditions": {
+        "elec_bus_volts": { "max": 23, "min_alt": 33 }
+      },
+      "plausible_phases": ["TAKEOFF", "CLIMB1", "CLIMB2", "CRUISE", "DESCENT", "APPROACH", "LANDING", "TAXI"]
+    },
+
+    "TAKEOFF_CONFIG": {
+      "conditions": {
+        "phase": "TAKEOFF",
+        "flap_ratio": { "max": 0.1 }
+      },
+      "plausible_phases": ["TAKEOFF"]
+    },
+
+    "LOW_FUEL": {
+      "conditions": {
+        "fuel_total_lbs": { "max": 3000 }
+      },
+      "plausible_phases": ["CRUISE", "DESCENT", "APPROACH", "LANDING"]
+    },
+
+    "ICING_CONDITION": {
+      "conditions": {
+        "oat_c": { "max": 10 },
+        "anti_ice_wing": { "eq": 0 }
+      },
+      "plausible_phases": ["CLIMB1", "CLIMB2", "CRUISE", "DESCENT", "APPROACH"]
+    },
+
+    "APU_FIRE": {
+      "conditions": {
+        "apu_egt_c": { "min": 760 },
+        "apu_running": { "eq": 1 }
+      },
+      "plausible_phases": ["TAXI", "TAKEOFF"]
+    },
+
+    "OIL_TEMP_HIGH": {
+      "conditions": {
+        "oil_temp_c_any": { "min": 120 }
+      },
+      "plausible_phases": ["TAKEOFF", "CLIMB1", "CLIMB2", "CRUISE", "DESCENT"]
+    },
+
+    "HYD_PRESS_LOW": {
+      "conditions": {
+        "hyd_press_psi_any": { "max": 2800 }
+      },
+      "plausible_phases": ["TAKEOFF", "CLIMB1", "CLIMB2", "CRUISE", "DESCENT", "APPROACH", "LANDING"]
+    },
+
+    "HYD_QTY_LOW": {
+      "conditions": {
+        "hyd_qty_pct_any": { "max": 0.20 }
+      },
+      "plausible_phases": ["TAKEOFF", "CLIMB1", "CLIMB2", "CRUISE", "DESCENT", "APPROACH", "LANDING"]
+    }
+  },
+
+  "dref_alerts": {
+    "_description": "DREF-only boolean alerts — randomly injected during training, read from X-Plane DREF at runtime. Conditions are placeholders for documentation only.",
+
+    "FIRE_ENG1": {
+      "dref_path": "sim/cockpit/warnings/annunciators/engine_fire",
+      "dref_index": 0,
+      "plausible_phases": ["TAKEOFF", "CLIMB1", "CLIMB2", "CRUISE", "DESCENT", "APPROACH", "LANDING", "TAXI"]
+    },
+    "FIRE_ENG2": {
+      "dref_path": "sim/cockpit/warnings/annunciators/engine_fire",
+      "dref_index": 1,
+      "plausible_phases": ["TAKEOFF", "CLIMB1", "CLIMB2", "CRUISE", "DESCENT", "APPROACH", "LANDING", "TAXI"]
+    },
+    "FIRE_APU": {
+      "dref_path": "sim/operation/failures/rel_fire_apu",
+      "plausible_phases": ["TAXI", "TAKEOFF", "CRUISE"]
+    },
+    "FIRE_WHEEL_WELL": {
+      "dref_path": "sim/cockpit/warnings/annunciators/fire_warning",
+      "plausible_phases": ["TAKEOFF", "LANDING"]
+    },
+    "FIRE_CARGO": {
+      "dref_path": "sim/cockpit/warnings/annunciators/cargo_door",
+      "plausible_phases": ["CRUISE"]
+    },
+
+    "TCAS_TA": {
+      "dref_path": "sim/cockpit2/tcas/indicators/*",
+      "plausible_phases": ["CLIMB1", "CLIMB2", "CRUISE", "DESCENT", "APPROACH"]
+    },
+    "TCAS_RA": {
+      "dref_path": "sim/cockpit2/tcas/indicators/*",
+      "plausible_phases": ["CLIMB1", "CLIMB2", "CRUISE", "DESCENT", "APPROACH"]
+    },
+
+    "STALL_WARNING": {
+      "dref_path": "sim/cockpit/warnings/annunciators/stall_warning",
+      "plausible_phases": ["TAKEOFF", "CLIMB1", "APPROACH", "LANDING"]
+    },
+
+    "DOOR_OPEN": {
+      "dref_path": "sim/cockpit/warnings/annunciators/door",
+      "plausible_phases": ["TAKEOFF", "CLIMB1", "CLIMB2", "CRUISE"]
+    },
+
+    "ELEC_FAULT": {
+      "dref_path": "sim/cockpit/warnings/annunciators/generator",
+      "plausible_phases": ["TAKEOFF", "CLIMB1", "CLIMB2", "CRUISE", "DESCENT", "APPROACH", "LANDING", "TAXI"]
+    },
+
+    "ANTI_ICE_FAULT": {
+      "dref_path": "sim/cockpit/warnings/annunciators/anti_ice",
+      "plausible_phases": ["CLIMB1", "CLIMB2", "CRUISE", "DESCENT"]
+    },
+
+    "AP_DISENGAGE": {
+      "dref_path": "sim/cockpit/warnings/annunciators/autopilot_disconnect",
+      "plausible_phases": ["CLIMB1", "CLIMB2", "CRUISE", "DESCENT", "APPROACH"]
+    },
+
+    "AT_DISENGAGE": {
+      "dref_path": "sim/cockpit2/autopilot/autothrottle_on",
+      "plausible_phases": ["CLIMB1", "CLIMB2", "CRUISE", "DESCENT", "APPROACH"]
+    }
+  },
+
+  "normal_ranges": {
+    "n1_pct":        [20, 97],
+    "n2_pct":        [18, 92],
+    "egt_c":         [100, 950],
+    "oil_press_psi": [25, 65],
+    "oil_temp_c":    [20, 120],
+    "cabin_alt_ft":  [0, 8000],
+    "cabin_diff_psi":[0, 8.5],
+    "hyd_press_psi": [2800, 3200],
+    "elec_bus_volts":[24, 32],
+    "fuel_total_lbs":[500, 20000],
+    "hyd_qty_pct":   [0.20, 1.0],
+    "oil_temp_c":    [20, 120]
+  }
+}

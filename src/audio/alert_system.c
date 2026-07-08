@@ -37,6 +37,7 @@
  * ========================================================================= */
 
 typedef enum {
+    /* === GPWS (13) — existing, unchanged === */
     ALERT_PULL_UP = 0,
     ALERT_WINDSHEAR,
     ALERT_MASTER_WARNING,
@@ -50,41 +51,57 @@ typedef enum {
     ALERT_OVERSPEED,
     ALERT_STALL,
     ALERT_MINIMUMS,
+    /* === System deviations (13) === */
+    ALERT_ENG_OVERHEAT,
+    ALERT_ENG_ASYM,
+    ALERT_FUEL_IMBALANCE,
+    ALERT_OIL_PRESS_LOW,
+    ALERT_CABIN_ALT_HIGH,
+    ALERT_BUS_VOLT_ABNORM,
+    ALERT_TAKEOFF_CONFIG,
+    ALERT_LOW_FUEL,
+    ALERT_ICING_CONDITION,
+    ALERT_APU_FIRE,
+    ALERT_OIL_TEMP_HIGH,
+    ALERT_HYD_PRESS_LOW,
+    ALERT_HYD_QTY_LOW,
+    /* === DREF-only (13) === */
+    ALERT_FIRE_ENG1,
+    ALERT_FIRE_ENG2,
+    ALERT_FIRE_APU,
+    ALERT_FIRE_WHEEL_WELL,
+    ALERT_FIRE_CARGO,
+    ALERT_TCAS_TA,
+    ALERT_TCAS_RA,
+    ALERT_STALL_WARNING,
+    ALERT_DOOR_OPEN,
+    ALERT_ELEC_FAULT,
+    ALERT_ANTI_ICE_FAULT,
+    ALERT_AP_DISENGAGE,
+    ALERT_AT_DISENGAGE,
     ALERT_TYPE_COUNT
 } AlertType;
 
-/* Priority: lower number = higher priority (overrides lower-priority tones) */
+/* Priority: lower = higher priority (overrides lower-priority tones) */
 static const int alert_priority[ALERT_TYPE_COUNT] = {
-    0,  /* PULL_UP      — critical */
-    1,  /* WINDSHEAR    — critical */
-    2,  /* MASTER_WARNING */
-    3,  /* MASTER_CAUTION */
-    4,  /* TERRAIN      — warning */
-    5,  /* SINK_RATE    — warning */
-    6,  /* TOO_LOW_GEAR — warning */
-    7,  /* TOO_LOW_FLAPS— caution */
-    8,  /* GLIDESLOPE   — caution */
-    9,  /* BANK_ANGLE   — caution */
-    10, /* OVERSPEED    — caution */
-    11, /* STALL        — critical */
-    12, /* MINIMUMS     — advisory */
+    /* GPWS */
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+    /* System — lower priority than GPWS */
+    13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+    /* DREF — advisory level, lowest priority */
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38,
 };
 
 /* Cooldown between repeated triggers (seconds) */
 static const float alert_cooldown[ALERT_TYPE_COUNT] = {
-    2.5f,   /* PULL_UP      — replay every 2.5s while condition holds */
-    2.0f,   /* WINDSHEAR    */
-    2.0f,   /* MASTER_WARNING */
-    2.0f,   /* MASTER_CAUTION */
-    3.0f,   /* TERRAIN      */
-    3.0f,   /* SINK_RATE    */
-    2.0f,   /* TOO_LOW_GEAR */
-    2.0f,   /* TOO_LOW_FLAPS*/
-    2.0f,   /* GLIDESLOPE   */
-    2.0f,   /* BANK_ANGLE   */
-    1.5f,   /* OVERSPEED    */
-    1.5f,   /* STALL        */
-    5.0f,   /* MINIMUMS     — trigger once */
+    /* GPWS */
+    2.5f, 2.0f, 2.0f, 2.0f, 3.0f, 3.0f, 2.0f, 2.0f, 2.0f, 2.0f, 1.5f, 1.5f, 5.0f,
+    /* System — longer cooldown, don't spam */
+    5.0f, 5.0f, 8.0f, 5.0f, 8.0f, 5.0f, 5.0f, 8.0f, 5.0f, 5.0f,
+    5.0f, 5.0f, 5.0f,
+    /* DREF */
+    3.0f, 3.0f, 3.0f, 3.0f, 3.0f, 3.0f, 3.0f, 2.0f,   /* fire + tcas + stall */
+    5.0f, 5.0f, 5.0f, 3.0f, 3.0f,                       /* door/elec/antiice/ap/at */
 };
 
 /* =========================================================================
@@ -317,13 +334,314 @@ static void configure_tone(ToneSlot* t, AlertType type)
 
     case ALERT_MINIMUMS:
         /* Triple ping: 1000Hz, 100ms each, 100ms gap */
-        /* We simulate this as a 3-beep pattern */
         t->wave        = WAVE_SINE;
         t->freq        = 1000.0f;
         t->volume      = 0.30f;
-        t->samples_total   = (SAMPLE_RATE * 600) / 1000;  /* 600ms total */
-        t->pulse_on_samples  = (SAMPLE_RATE * 100) / 1000; /* 100ms on */
-        t->pulse_off_samples = (SAMPLE_RATE * 100) / 1000; /* 100ms off */
+        t->samples_total   = (SAMPLE_RATE * 600) / 1000;
+        t->pulse_on_samples  = (SAMPLE_RATE * 100) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 100) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    /* =====================================================================
+     *  System deviations — distinctive tones for testing
+     * ===================================================================== */
+
+    case ALERT_ENG_OVERHEAT:
+        /* Rising sweep 400→800Hz, 500ms, 2 beeps */
+        t->wave        = WAVE_SAW;
+        t->freq_start  = 400.0f;
+        t->freq_end    = 800.0f;
+        t->volume      = 0.25f;
+        t->samples_total   = (SAMPLE_RATE * 500) / 1000;
+        t->pulse_on_samples  = t->samples_total;
+        t->pulse_off_samples = 0;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_ENG_ASYM:
+        /* Alternating 500/700Hz, 150ms each */
+        t->wave        = WAVE_SQUARE;
+        t->freq_start  = 500.0f;
+        t->freq_end    = 700.0f;
+        t->volume      = 0.25f;
+        t->samples_total   = (SAMPLE_RATE * 600) / 1000;
+        t->pulse_on_samples  = (SAMPLE_RATE * 150) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 150) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_FUEL_IMBALANCE:
+        /* Low 250Hz hum, 300ms */
+        t->wave        = WAVE_SINE;
+        t->freq        = 250.0f;
+        t->volume      = 0.20f;
+        t->samples_total   = (SAMPLE_RATE * 300) / 1000;
+        t->pulse_on_samples  = t->samples_total;
+        t->pulse_off_samples = 0;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_OIL_PRESS_LOW:
+        /* Slow pulsing 350Hz, 200ms on/400ms off */
+        t->wave        = WAVE_SINE;
+        t->freq        = 350.0f;
+        t->volume      = 0.22f;
+        t->samples_total   = SAMPLE_RATE * 2;
+        t->pulse_on_samples  = (SAMPLE_RATE * 200) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 400) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_CABIN_ALT_HIGH:
+        /* Urgent 900Hz rapid beeps, 100ms on/100ms off */
+        t->wave        = WAVE_SQUARE;
+        t->freq        = 900.0f;
+        t->volume      = 0.28f;
+        t->samples_total   = SAMPLE_RATE * 2;
+        t->pulse_on_samples  = (SAMPLE_RATE * 100) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 100) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_BUS_VOLT_ABNORM:
+        /* Buzzy 120Hz saw, 400ms */
+        t->wave        = WAVE_SAW;
+        t->freq        = 120.0f;
+        t->volume      = 0.18f;
+        t->samples_total   = (SAMPLE_RATE * 400) / 1000;
+        t->pulse_on_samples  = t->samples_total;
+        t->pulse_off_samples = 0;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_TAKEOFF_CONFIG:
+        /* Double chime: 600Hz, 150ms, gap 100ms, 600Hz, 150ms */
+        t->wave        = WAVE_SINE;
+        t->freq        = 600.0f;
+        t->volume      = 0.25f;
+        t->samples_total   = (SAMPLE_RATE * 400) / 1000;
+        t->pulse_on_samples  = (SAMPLE_RATE * 150) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 100) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_LOW_FUEL:
+        /* Descending tone 500→200Hz, 1s */
+        t->wave        = WAVE_SINE;
+        t->freq_start  = 500.0f;
+        t->freq_end    = 200.0f;
+        t->volume      = 0.22f;
+        t->samples_total   = SAMPLE_RATE * 1;
+        t->pulse_on_samples  = t->samples_total;
+        t->pulse_off_samples = 0;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_ICING_CONDITION:
+        /* Crisp 700Hz, 200ms beeps × 2 */
+        t->wave        = WAVE_SINE;
+        t->freq        = 700.0f;
+        t->volume      = 0.22f;
+        t->samples_total   = (SAMPLE_RATE * 500) / 1000;
+        t->pulse_on_samples  = (SAMPLE_RATE * 200) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 50) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_APU_FIRE:
+        /* Very high 1200Hz fast pulse, urgent */
+        t->wave        = WAVE_SQUARE;
+        t->freq        = 1200.0f;
+        t->volume      = 0.30f;
+        t->samples_total   = SAMPLE_RATE * 2;
+        t->pulse_on_samples  = (SAMPLE_RATE * 50) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 50) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_OIL_TEMP_HIGH:
+        /* Rising 300→600Hz sweep, 600ms */
+        t->wave        = WAVE_SAW;
+        t->freq_start  = 300.0f;
+        t->freq_end    = 600.0f;
+        t->volume      = 0.22f;
+        t->samples_total   = (SAMPLE_RATE * 600) / 1000;
+        t->pulse_on_samples  = t->samples_total;
+        t->pulse_off_samples = 0;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_HYD_PRESS_LOW:
+        /* Heavy 200Hz square, 300ms pulses */
+        t->wave        = WAVE_SQUARE;
+        t->freq        = 200.0f;
+        t->volume      = 0.22f;
+        t->samples_total   = SAMPLE_RATE * 2;
+        t->pulse_on_samples  = (SAMPLE_RATE * 300) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 300) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_HYD_QTY_LOW:
+        /* Thin 180Hz sine, 400ms */
+        t->wave        = WAVE_SINE;
+        t->freq        = 180.0f;
+        t->volume      = 0.20f;
+        t->samples_total   = (SAMPLE_RATE * 400) / 1000;
+        t->pulse_on_samples  = t->samples_total;
+        t->pulse_off_samples = 0;
+        t->pulse_state = 1;
+        break;
+
+    /* =====================================================================
+     *  DREF-only alerts — fire / TCAS / doors / systems
+     * ===================================================================== */
+
+    case ALERT_FIRE_ENG1:
+        /* Fire bell: VERY loud 850Hz saw, rapid ring */
+        t->wave        = WAVE_SAW;
+        t->freq        = 850.0f;
+        t->volume      = 0.38f;
+        t->samples_total   = SAMPLE_RATE * 3;
+        t->pulse_on_samples  = (SAMPLE_RATE * 30) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 30) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_FIRE_ENG2:
+        /* Same as Eng1 but slightly different pitch (880Hz) to distinguish */
+        t->wave        = WAVE_SAW;
+        t->freq        = 880.0f;
+        t->volume      = 0.38f;
+        t->samples_total   = SAMPLE_RATE * 3;
+        t->pulse_on_samples  = (SAMPLE_RATE * 30) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 30) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_FIRE_APU:
+        /* APU fire: 1100Hz square rapid beep, 2s */
+        t->wave        = WAVE_SQUARE;
+        t->freq        = 1100.0f;
+        t->volume      = 0.35f;
+        t->samples_total   = SAMPLE_RATE * 2;
+        t->pulse_on_samples  = (SAMPLE_RATE * 40) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 40) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_FIRE_WHEEL_WELL:
+        /* Wheel well: 750Hz, slower pulse */
+        t->wave        = WAVE_SQUARE;
+        t->freq        = 750.0f;
+        t->volume      = 0.32f;
+        t->samples_total   = SAMPLE_RATE * 2;
+        t->pulse_on_samples  = (SAMPLE_RATE * 100) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 100) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_FIRE_CARGO:
+        /* Cargo: 650Hz alternating with 500Hz */
+        t->wave        = WAVE_SQUARE;
+        t->freq_start  = 650.0f;
+        t->freq_end    = 500.0f;
+        t->volume      = 0.30f;
+        t->samples_total   = SAMPLE_RATE * 3;
+        t->pulse_on_samples  = (SAMPLE_RATE * 150) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 150) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_TCAS_TA:
+        /* TCAS TA: Soft triple ping at 1000Hz, 50ms each */
+        t->wave        = WAVE_SINE;
+        t->freq        = 1000.0f;
+        t->volume      = 0.25f;
+        t->samples_total   = (SAMPLE_RATE * 350) / 1000;
+        t->pulse_on_samples  = (SAMPLE_RATE * 50) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 100) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_TCAS_RA:
+        /* TCAS RA: Loud double ping 1200+1000Hz alternating */
+        t->wave        = WAVE_SQUARE;
+        t->freq_start  = 1200.0f;
+        t->freq_end    = 1000.0f;
+        t->volume      = 0.32f;
+        t->samples_total   = SAMPLE_RATE * 1;
+        t->pulse_on_samples  = (SAMPLE_RATE * 100) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 100) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_STALL_WARNING:
+        /* Stick shaker: Low 80Hz loud saw, rapid pulse */
+        t->wave        = WAVE_SAW;
+        t->freq        = 80.0f;
+        t->volume      = 0.40f;
+        t->samples_total   = SAMPLE_RATE * 2;
+        t->pulse_on_samples  = (SAMPLE_RATE * 40) / 1000;
+        t->pulse_off_samples = (SAMPLE_RATE * 40) / 1000;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_DOOR_OPEN:
+        /* Single 500Hz chime, 200ms */
+        t->wave        = WAVE_SINE;
+        t->freq        = 500.0f;
+        t->volume      = 0.20f;
+        t->samples_total   = (SAMPLE_RATE * 200) / 1000;
+        t->pulse_on_samples  = t->samples_total;
+        t->pulse_off_samples = 0;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_ELEC_FAULT:
+        /* Electrical buzz: 60Hz saw, 500ms */
+        t->wave        = WAVE_SAW;
+        t->freq        = 60.0f;
+        t->volume      = 0.18f;
+        t->samples_total   = (SAMPLE_RATE * 500) / 1000;
+        t->pulse_on_samples  = t->samples_total;
+        t->pulse_off_samples = 0;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_ANTI_ICE_FAULT:
+        /* Cold crisp ping: 900Hz sine, 150ms */
+        t->wave        = WAVE_SINE;
+        t->freq        = 900.0f;
+        t->volume      = 0.20f;
+        t->samples_total   = (SAMPLE_RATE * 150) / 1000;
+        t->pulse_on_samples  = t->samples_total;
+        t->pulse_off_samples = 0;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_AP_DISENGAGE:
+        /* AP disconnect wail: 400→200Hz sweep, 800ms */
+        t->wave        = WAVE_SINE;
+        t->freq_start  = 400.0f;
+        t->freq_end    = 200.0f;
+        t->volume      = 0.25f;
+        t->samples_total   = (SAMPLE_RATE * 800) / 1000;
+        t->pulse_on_samples  = t->samples_total;
+        t->pulse_off_samples = 0;
+        t->pulse_state = 1;
+        break;
+
+    case ALERT_AT_DISENGAGE:
+        /* AT disconnect: 300→150Hz sweep, 600ms */
+        t->wave        = WAVE_SINE;
+        t->freq_start  = 300.0f;
+        t->freq_end    = 150.0f;
+        t->volume      = 0.22f;
+        t->samples_total   = (SAMPLE_RATE * 600) / 1000;
+        t->pulse_on_samples  = t->samples_total;
+        t->pulse_off_samples = 0;
         t->pulse_state = 1;
         break;
 
@@ -773,5 +1091,281 @@ void alert_system_update(AlertSystem* as, const FlightDataValues* fd, float dt)
     evaluate_alerts(as, fd, dt);
 
     /* Store for next frame */
+    memcpy(&as->prev_fd, fd, sizeof(FlightDataValues));
+}
+
+/* =========================================================================
+ *  Alert state query (for AI / external consumers)
+ * ========================================================================= */
+
+void alert_system_get_active_alerts(const AlertSystem* as,
+                                    const FlightDataValues* fd,
+                                    int* out_states)
+{
+    if (!fd || !out_states) return;
+    memset(out_states, 0, sizeof(int) * ALERT_ID_COUNT);
+
+    float agl_ft    = fd->altitude_agl_ft;
+    float vs_fpm    = fd->vs_fpm;
+    float ias_kts   = fd->ias_kts;
+    float roll_deg  = fd->roll_deg;
+    float flaps     = fd->flap_ratio;
+    int   gear_down = fd->gear_deployed;
+
+    /* === GPWS alerts (13) — same thresholds as evaluate_alerts() === */
+
+    /* PULL_UP: AGL < 100ft, sink > 2000 fpm, not landing */
+    if (agl_ft < 100.0f && vs_fpm < -2000.0f)
+        out_states[ALERT_ID_PULL_UP] = 1;
+
+    /* WINDSHEAR (approximate: check dref_windshear DREF first) */
+    if (fd->dref_windshear)
+        out_states[ALERT_ID_WINDSHEAR] = 1;
+    else if (as) {
+        /* PENDING: IAS delta check needs recent history.
+         * For now, mark active if DREF says so. The audio path already handles
+         * this correctly. Future: expose ias_delta from AlertSystem state. */
+    }
+
+    /* MASTER_WARNING / MASTER_CAUTION */
+    if (fd->master_warning)
+        out_states[ALERT_ID_MASTER_WARNING] = 1;
+    if (fd->master_caution)
+        out_states[ALERT_ID_MASTER_CAUTION] = 1;
+
+    /* TERRAIN: 100 < AGL < 1000, sink > 1500 fpm */
+    if (agl_ft < 1000.0f && vs_fpm < -1500.0f && agl_ft > 100.0f)
+        out_states[ALERT_ID_TERRAIN] = 1;
+
+    /* SINK_RATE: 500 < AGL < 2500, sink > 1500 fpm */
+    if (agl_ft < 2500.0f && vs_fpm < -1500.0f && agl_ft > 500.0f)
+        out_states[ALERT_ID_SINK_RATE] = 1;
+
+    /* TOO_LOW_GEAR: AGL < 500ft, gear up, descending */
+    if (agl_ft < 500.0f && !gear_down && vs_fpm < -50.0f)
+        out_states[ALERT_ID_TOO_LOW_GEAR] = 1;
+
+    /* TOO_LOW_FLAPS: AGL < 500ft, flaps < 25%, descending */
+    if (agl_ft < 500.0f && flaps < 0.25f && vs_fpm < -50.0f)
+        out_states[ALERT_ID_TOO_LOW_FLAPS] = 1;
+
+    /* GLIDESLOPE: AGL < 1000ft, CDI > 0.5 dots */
+    if (agl_ft < 1000.0f && fabsf(fd->nav1_cdi) > 0.5f)
+        out_states[ALERT_ID_GLIDESLOPE] = 1;
+
+    /* BANK_ANGLE: |roll| > 35° below 2000ft AGL */
+    if (agl_ft < 2000.0f && fabsf(roll_deg) > 35.0f)
+        out_states[ALERT_ID_BANK_ANGLE] = 1;
+
+    /* OVERSPEED: IAS > 340 kts */
+    if (ias_kts > 340.0f)
+        out_states[ALERT_ID_OVERSPEED] = 1;
+
+    /* STALL: IAS < 110 kts, airborne */
+    if (ias_kts < 110.0f && agl_ft > 0.0f)
+        out_states[ALERT_ID_STALL] = 1;
+
+    /* MINIMUMS: AGL within ±100ft of 200ft, descending */
+    if (agl_ft > 100.0f && agl_ft < 300.0f && vs_fpm < -50.0f)
+        out_states[ALERT_ID_MINIMUMS] = 1;
+
+    /* === System deviations (13) === */
+
+    /* ENG_OVERHEAT: EGT > 850°C */
+    {
+        float egt_max = fd->egt_c[0];
+        for (int i = 1; i < 4; i++)
+            if (fd->egt_c[i] > egt_max) egt_max = fd->egt_c[i];
+        if (egt_max > 850.0f)
+            out_states[ALERT_ID_ENG_OVERHEAT] = 1;
+    }
+
+    /* ENG_ASYM: N1 diff > 5% */
+    {
+        float n1_diff = fabsf(fd->n1_pct[0] - fd->n1_pct[1]);
+        if (n1_diff > 5.0f)
+            out_states[ALERT_ID_ENG_ASYM] = 1;
+    }
+
+    /* FUEL_IMBALANCE: estimated diff > 1000 lbs (we approximate from N1 diff) */
+    {
+        float n1_diff_pct = fabsf(fd->n1_pct[0] - fd->n1_pct[1]);
+        float estim_imb = n1_diff_pct * 200.0f;  /* rough heuristic */
+        if (estim_imb > 1000.0f)
+            out_states[ALERT_ID_FUEL_IMBALANCE] = 1;
+    }
+
+    /* OIL_PRESS_LOW: min oil press < 25 psi */
+    {
+        float oil_min = fd->oil_press_psi[0];
+        for (int i = 1; i < 2; i++)
+            if (fd->oil_press_psi[i] < oil_min) oil_min = fd->oil_press_psi[i];
+        if (oil_min < 25.0f)
+            out_states[ALERT_ID_OIL_PRESS_LOW] = 1;
+    }
+
+    /* CABIN_ALT_HIGH: cabin alt > 10000 ft */
+    if (fd->cabin_alt_ft > 10000.0f)
+        out_states[ALERT_ID_CABIN_ALT_HIGH] = 1;
+
+    /* BUS_VOLT_ABNORM: voltage outside 24-32V */
+    if (fd->elec_bus_volts < 24.0f || fd->elec_bus_volts > 32.0f)
+        out_states[ALERT_ID_BUS_VOLT_ABNORM] = 1;
+
+    /* TAKEOFF_CONFIG: flaps < 10% below 100ft (simplified — phase unknown) */
+    if (agl_ft < 100.0f && flaps < 0.10f && vs_fpm > 50.0f)
+        out_states[ALERT_ID_TAKEOFF_CONFIG] = 1;
+
+    /* LOW_FUEL: total < 3000 lbs */
+    if (fd->fuel_total_lbs < 3000.0f && fd->fuel_total_lbs > 0.0f)
+        out_states[ALERT_ID_LOW_FUEL] = 1;
+
+    /* ICING_CONDITION: OAT < 10°C, anti-ice off, airborne */
+    if (fd->oat_c < 10.0f && !fd->anti_ice_wing && agl_ft > 100.0f)
+        out_states[ALERT_ID_ICING_CONDITION] = 1;
+
+    /* APU_FIRE: APU EGT > 760°C, APU running */
+    if (fd->apu_egt_c > 760.0f && fd->apu_running)
+        out_states[ALERT_ID_APU_FIRE] = 1;
+
+    /* OIL_TEMP_HIGH: max oil temp > 120°C */
+    {
+        float oil_tmax = fd->oil_temp_c[0];
+        for (int i = 1; i < 2; i++)
+            if (fd->oil_temp_c[i] > oil_tmax) oil_tmax = fd->oil_temp_c[i];
+        if (oil_tmax > 120.0f)
+            out_states[ALERT_ID_OIL_TEMP_HIGH] = 1;
+    }
+
+    /* HYD_PRESS_LOW: use DREF numeric values if available, else UDP */
+    {
+        float hp0 = fd->dref_hyd_press_psi[0];
+        float hp1 = fd->dref_hyd_press_psi[1];
+        if (hp0 > 0.0f || hp1 > 0.0f) {
+            /* DREF values available */
+            if ((hp0 > 0.0f && hp0 < 2800.0f) || (hp1 > 0.0f && hp1 < 2800.0f))
+                out_states[ALERT_ID_HYD_PRESS_LOW] = 1;
+        } else {
+            /* Fall back to UDP hyd_press_psi (may not be received) */
+            float hmin = fd->hyd_press_psi[0];
+            for (int i = 1; i < 2; i++)
+                if (fd->hyd_press_psi[i] < hmin) hmin = fd->hyd_press_psi[i];
+            if (hmin > 100.0f && hmin < 2800.0f)
+                out_states[ALERT_ID_HYD_PRESS_LOW] = 1;
+        }
+    }
+
+    /* HYD_QTY_LOW: DREF numeric values */
+    {
+        float hq0 = fd->dref_hyd_qty_pct[0];
+        float hq1 = fd->dref_hyd_qty_pct[1];
+        if (hq0 > 0.0f || hq1 > 0.0f) {
+            if ((hq0 > 0.0f && hq0 < 0.20f) || (hq1 > 0.0f && hq1 < 0.20f))
+                out_states[ALERT_ID_HYD_QTY_LOW] = 1;
+        }
+    }
+
+    /* === DREF-only alerts (13) — read directly from RREF-populated fields === */
+
+    if (fd->dref_engine_fire) {
+        /* engine_fire DREF is an array; index 0=Eng1, 1=Eng2. We only get
+         * the first value via RREF. For full coverage, subscribe to both indices.
+         * For now: treat as "any engine fire". */
+        out_states[ALERT_ID_FIRE_ENG1] = 1;  /* conservative: assume Eng1 */
+    }
+    if (fd->dref_fire_warning)
+        out_states[ALERT_ID_FIRE_WHEEL_WELL] = 1;
+
+    if (fd->dref_ap_disconnect)
+        out_states[ALERT_ID_AP_DISENGAGE] = 1;
+
+    /* AT disconnect: detected as AP_ATHR going 1→0 (edge). For now use DREF.
+     * PENDING: add proper edge detection. */
+    if (fd->dref_ap_disconnect)  /* share same DREF for now */
+        out_states[ALERT_ID_AT_DISENGAGE] = 1;
+
+    if (fd->dref_door)
+        out_states[ALERT_ID_DOOR_OPEN] = 1;
+
+    if (fd->dref_generator)
+        out_states[ALERT_ID_ELEC_FAULT] = 1;
+
+    if (fd->dref_anti_ice)
+        out_states[ALERT_ID_ANTI_ICE_FAULT] = 1;
+
+    if (fd->dref_stall_warning)
+        out_states[ALERT_ID_STALL_WARNING] = 1;
+
+    /* Fire alerts: use engine_fire + fire_warning + apu_fire (derived) */
+    if (fd->dref_hyd_pressure)
+        out_states[ALERT_ID_HYD_PRESS_LOW] = 1;
+    if (fd->dref_hyd_quantity)
+        out_states[ALERT_ID_HYD_QTY_LOW] = 1;
+
+    if (fd->dref_cabin_altitude)
+        out_states[ALERT_ID_CABIN_ALT_HIGH] = 1;
+
+    if (fd->dref_fuel_quantity)
+        out_states[ALERT_ID_LOW_FUEL] = 1;
+
+    if (fd->dref_oil_pressure)
+        out_states[ALERT_ID_OIL_PRESS_LOW] = 1;
+
+    if (fd->dref_oil_temperature)
+        out_states[ALERT_ID_OIL_TEMP_HIGH] = 1;
+
+    if (fd->dref_voltage)
+        out_states[ALERT_ID_BUS_VOLT_ABNORM] = 1;
+
+    if (fd->dref_pressurization)
+        out_states[ALERT_ID_CABIN_ALT_HIGH] = 1;
+
+    if (fd->dref_ice)
+        out_states[ALERT_ID_ICING_CONDITION] = 1;
+
+    /* TCAS: not yet implemented (needs sim/cockpit2/tcas/indicators/* DREFs) */
+    /* APU fire: covered by ALERT_ID_APU_FIRE (derived from EGT) */
+
+    /* Mark as inactive until we have proper TCAS DREF subscriptions */
+    /* (out_states[ALERT_ID_TCAS_TA] and ALERT_ID_TCAS_RA remain 0 for now) */
+}
+
+/* =========================================================================
+ *  Test function — play distinctive tone for every active alert
+ * ========================================================================= */
+
+/**
+ * @brief AlertID → internal AlertType mapping.
+ * ALERT_ID_* (0..38) maps 1:1 to ALERT_* (0..38) since both enums are
+ * defined in the same order.
+ */
+void alert_system_test_beeps(AlertSystem* as, const FlightDataValues* fd)
+{
+    if (!as || !fd) return;
+    if (!as->audio_ok) return;
+
+    /* Get all active alerts */
+    int alert_states[ALERT_ID_COUNT];
+    alert_system_get_active_alerts(as, fd, alert_states);
+
+    /* Update cooldown timers */
+    float dt = 0.05f;  /* rough: called at ~20 Hz */
+    for (int i = 0; i < ALERT_TYPE_COUNT; i++) {
+        if (as->cooldown_timer[i] > 0.0f) {
+            as->cooldown_timer[i] -= dt;
+        }
+    }
+
+    /* Trigger tone for each active alert (if not on cooldown) */
+    for (int id = 0; id < ALERT_ID_COUNT; id++) {
+        if (!alert_states[id]) continue;
+        if (as->cooldown_timer[id] <= 0.0f) {
+            /* Internal AlertType enum has same order as AlertID enum */
+            tone_start(as, (AlertType)id);
+            as->cooldown_timer[id] = alert_cooldown[id];
+        }
+    }
+
+    /* Store copy for next frame */
     memcpy(&as->prev_fd, fd, sizeof(FlightDataValues));
 }

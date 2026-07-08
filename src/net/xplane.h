@@ -126,4 +126,57 @@ int xplane_send_dref_array(UDPSocket* sock, const char* xp_host, int xp_port,
 int xplane_send_command(UDPSocket* sock, const char* xp_host, int xp_port,
                         const char* command);
 
+/* =========================================================================
+ *  RREF — Request DataRef (read values back from X-Plane)
+ * ========================================================================= */
+
+#define XP_RREF_PATH_MAX    400
+#define XP_RREF_PACKET_SZ   413    /* "RREF\0"(5) + freq(4) + id(4) + path(400) */
+#define XP_RREF_HEADER      4      /* "RREF" without null */
+#define XP_RREF_MAX_DREFS    32    /* max concurrent subscriptions */
+
+/**
+ * @brief Subscribe to a DataRef value stream from X-Plane.
+ *
+ * Sends an RREF request packet. X-Plane will stream the value back at the
+ * requested frequency on our receive port. Responses are parsed by
+ * xplane_parse_rref() in the packet handler.
+ *
+ * @param sock       Our UDP socket (for sending).
+ * @param xp_host    X-Plane host IP.
+ * @param xp_port    X-Plane receive port (default 49000).
+ * @param dref_path  Full DataRef path (e.g. "sim/cockpit/warnings/annunciators/bank_angle").
+ * @param request_id Unique ID (0..255) to identify this subscription in responses.
+ * @param freq_hz    Desired update rate (1-10 Hz; lower = less network load).
+ * @return 0 on success, -1 on failure.
+ */
+int xplane_rref_subscribe(UDPSocket* sock, const char* xp_host, int xp_port,
+                          const char* dref_path, int request_id, int freq_hz);
+
+/**
+ * @brief Parse an RREF response packet and update flight data.
+ *
+ * Call this from the packet handler when a non-DATA packet is received.
+ * RREF responses have the prologue "RREF" (4 bytes, no null).
+ *
+ * @param data   Raw UDP payload.
+ * @param len    Payload length.
+ * @param fd     Flight data to update (thread-safe — call under lock).
+ * @return 1 if packet was an RREF response, 0 otherwise.
+ */
+int xplane_parse_rref(const uint8_t* data, int len, FlightData* fd);
+
+/**
+ * @brief Subscribe to all required DREF alert state datarefs.
+ *
+ * Convenience function — calls xplane_rref_subscribe() for each of the
+ * 25 alert-state datarefs needed for the B737 alert system.
+ *
+ * @param sock     Our UDP socket.
+ * @param xp_host  X-Plane host IP.
+ * @param xp_port  X-Plane receive port (default 49000).
+ * @return 0 if at least one subscription succeeded, -1 on total failure.
+ */
+int xplane_rref_subscribe_all(UDPSocket* sock, const char* xp_host, int xp_port);
+
 #endif /* XPLANE_H */

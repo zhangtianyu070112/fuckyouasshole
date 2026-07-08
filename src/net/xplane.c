@@ -366,8 +366,11 @@ void xplane_parse_packet(const uint8_t* data, int len, FlightData* fd)
 
     /* Check prologue — accept "DATA\0", "DATA ", or "DATA*" (XP11/12) */
     if (memcmp(data, "DATA", 4) != 0) {
-        /* Log the first few non-DATA packets so we can see what X-Plane
-         * is actually sending (e.g. RPOS responses, new XP12 formats, etc.) */
+        /* Try RREF response first (very common for alert state subscriptions) */
+        if (xplane_parse_rref(data, len, fd)) {
+            return;  /* handled as RREF */
+        }
+        /* Log the first few truly unknown packets */
         static int unknown_logged = 0;
         if (unknown_logged < 5) {
             unknown_logged++;
@@ -608,4 +611,204 @@ int xplane_send_command(UDPSocket* sock, const char* xp_host, int xp_port,
 
     LOG_WARN("xplane_send_command: sendto failed for %s (ret=%d)", command, ret);
     return -1;
+}
+
+/* =========================================================================
+ *  RREF — Request DataRef (read values from X-Plane)
+ * ========================================================================= */
+
+/**
+ * X-Plane RREF protocol (port 49000):
+ *
+ * Request (413 bytes fixed for XP12 compatibility):
+ *   [0..4]   "RREF\0"  (5 bytes, null-terminated)
+ *   [5..8]   Frequency: int32 LE (Hz, 1-10)
+ *   [9..12]  Request ID: int32 LE (unique per subscription)
+ *   [13..412] DataRef path: null-padded to 400 bytes
+ *
+ * Response (variable, received on our listen port):
+ *   [0..3]   "RREF"  (4 bytes, no null)
+ *   [4..7]   Request ID: int32 LE  (matches our subscription)
+ *   [8..N]   float value(s): one 4-byte LE float per array element
+ *
+ * NOTE: For array datarefs (e.g. engine_fire[0]), X-Plane returns
+ * a single scalar value. Use indexed paths to subscribe to each element.
+ */
+
+/* Map request ID → flight data field offset and type */
+typedef struct {
+    int   request_id;       /* our subscription ID */
+    int   field_offset;     /* byte offset within FlightDataValues */
+    int   is_float;         /* 1 = float, 0 = int (boolean) */
+    const char* name;       /* for debug logging */
+} RREFMapping;
+
+static int rref_mapping_count = 0;
+
+int xplane_rref_subscribe(UDPSocket* sock, const char* xp_host, int xp_port,
+                          const char* dref_path, int request_id, int freq_hz)
+{
+    if (!sock || !xp_host || !dref_path) return -1;
+    if (freq_hz < 1)  freq_hz = 1;
+    if (freq_hz > 10) freq_hz = 10;
+
+    int path_len = (int)strlen(dref_path);
+    if (path_len < 1 || path_len >= XP_RREF_PATH_MAX) return -1;
+
+    /* Build 413-byte RREF request */
+    uint8_t buf[XP_RREF_PACKET_SZ];
+    memset(buf, 0, sizeof(buf));
+
+    /* [0..4] "RREF\0" */
+    memcpy(buf, "RREF", 4);
+
+    /* [5..8] frequency (int32 LE) */
+    buf[5] = (uint8_t)(freq_hz & 0xFF);
+    buf[6] = (uint8_t)((freq_hz >> 8) & 0xFF);
+    buf[7] = (uint8_t)((freq_hz >> 16) & 0xFF);
+    buf[8] = (uint8_t)((freq_hz >> 24) & 0xFF);
+
+    /* [9..12] request ID (int32 LE) */
+    buf[9]  = (uint8_t)(request_id & 0xFF);
+    buf[10] = (uint8_t)((request_id >> 8) & 0xFF);
+    buf[11] = (uint8_t)((request_id >> 16) & 0xFF);
+    buf[12] = (uint8_t)((request_id >> 24) & 0xFF);
+
+    /* [13..412] DataRef path (null-padded to 400 bytes) */
+    memcpy(buf + 13, dref_path, (size_t)path_len);
+    /* rest is already zero from memset */
+
+    int ret = udp_socket_sendto(sock, buf, XP_RREF_PACKET_SZ, xp_host, xp_port);
+    if (ret > 0) {
+        LOG_INFO("RREF subscribed: [%d] %s @ %d Hz", request_id, dref_path, freq_hz);
+        return 0;
+    }
+
+    LOG_WARN("xplane_rref_subscribe: sendto failed for %s (ret=%d)", dref_path, ret);
+    return -1;
+}
+
+int xplane_parse_rref(const uint8_t* data, int len, FlightData* fd)
+{
+    if (!data || !fd) return 0;
+
+    /* Must have at least: "RREF"(4) + request_id(4) + float(4) = 12 bytes */
+    if (len < 12) return 0;
+
+    /* Check prologue: "RREF" (4 bytes, no null — XP sends without null) */
+    if (memcmp(data, "RREF", 4) != 0) return 0;
+
+    /* Read request ID */
+    int32_t req_id = (int32_t)data[4]
+                   | ((int32_t)data[5] << 8)
+                   | ((int32_t)data[6] << 16)
+                   | ((int32_t)data[7] << 24);
+
+    if (req_id < 0 || req_id >= XP_RREF_MAX_DREFS) {
+        return 1;  /* acknowledge but out of range */
+    }
+
+    /* Read float value */
+    int32_t raw = (int32_t)data[8]
+                | ((int32_t)data[9] << 8)
+                | ((int32_t)data[10] << 16)
+                | ((int32_t)data[11] << 24);
+    float value;
+    memcpy(&value, &raw, sizeof(value));
+
+    SDL_LockMutex(fd->mutex);
+
+    /* Map request ID → FlightDataValues field
+     * IDs 0-20: boolean annunciators (threshold at 0.5)
+     * IDs 21-24: float hydraulic values */
+    switch (req_id) {
+    case 0:  fd->current.dref_bank_angle      = (value > 0.5f) ? 1 : 0; break;
+    case 1:  fd->current.dref_stall_warning   = (value > 0.5f) ? 1 : 0; break;
+    case 2:  fd->current.dref_gear_warning    = (value > 0.5f) ? 1 : 0; break;
+    case 3:  fd->current.dref_gpws            = (value > 0.5f) ? 1 : 0; break;
+    case 4:  fd->current.dref_overspeed       = (value > 0.5f) ? 1 : 0; break;
+    case 5:  fd->current.dref_windshear       = (value > 0.5f) ? 1 : 0; break;
+    case 6:  fd->current.dref_ap_disconnect   = (value > 0.5f) ? 1 : 0; break;
+    case 7:  fd->current.dref_engine_fire     = (value > 0.5f) ? 1 : 0; break;
+    case 8:  fd->current.dref_fire_warning    = (value > 0.5f) ? 1 : 0; break;
+    case 9:  fd->current.dref_door            = (value > 0.5f) ? 1 : 0; break;
+    case 10: fd->current.dref_generator       = (value > 0.5f) ? 1 : 0; break;
+    case 11: fd->current.dref_anti_ice        = (value > 0.5f) ? 1 : 0; break;
+    case 12: fd->current.dref_hyd_pressure    = (value > 0.5f) ? 1 : 0; break;
+    case 13: fd->current.dref_hyd_quantity    = (value > 0.5f) ? 1 : 0; break;
+    case 14: fd->current.dref_cabin_altitude  = (value > 0.5f) ? 1 : 0; break;
+    case 15: fd->current.dref_fuel_quantity   = (value > 0.5f) ? 1 : 0; break;
+    case 16: fd->current.dref_oil_pressure    = (value > 0.5f) ? 1 : 0; break;
+    case 17: fd->current.dref_oil_temperature = (value > 0.5f) ? 1 : 0; break;
+    case 18: fd->current.dref_voltage         = (value > 0.5f) ? 1 : 0; break;
+    case 19: fd->current.dref_pressurization  = (value > 0.5f) ? 1 : 0; break;
+    case 20: fd->current.dref_ice             = (value > 0.5f) ? 1 : 0; break;
+    /* Hydraulic numeric values */
+    case 21: fd->current.dref_hyd_press_psi[0] = value; break;
+    case 22: fd->current.dref_hyd_press_psi[1] = value; break;
+    case 23: fd->current.dref_hyd_qty_pct[0]   = value; break;
+    case 24: fd->current.dref_hyd_qty_pct[1]   = value; break;
+    default: break;
+    }
+
+    SDL_UnlockMutex(fd->mutex);
+    return 1;
+}
+
+/**
+ * @brief Subscribe to all required DREF alert state datarefs.
+ *
+ * Call once during initialization, after X-Plane DATA subscription is set up.
+ * Uses request IDs 0-24. All at 4 Hz (good balance between responsiveness
+ * and network load for alert states that change infrequently).
+ */
+int xplane_rref_subscribe_all(UDPSocket* sock, const char* xp_host, int xp_port)
+{
+    if (!sock || !xp_host) return -1;
+
+    /* Structure: { request_id, dref_path, freq_hz } */
+    struct { int id; const char* path; int freq; } subs[] = {
+        /* GPWS/warning annunciators (20 boolean) */
+        {0,  "sim/cockpit/warnings/annunciators/bank_angle",            4},
+        {1,  "sim/cockpit/warnings/annunciators/stall_warning",         4},
+        {2,  "sim/cockpit/warnings/annunciators/gear_warning",          4},
+        {3,  "sim/cockpit/warnings/annunciators/GPWS",                  4},
+        {4,  "sim/cockpit/warnings/annunciators/overspeed",             4},
+        {5,  "sim/cockpit/warnings/annunciators/windshear",             4},
+        {6,  "sim/cockpit/warnings/annunciators/autopilot_disconnect",  4},
+        {7,  "sim/cockpit/warnings/annunciators/engine_fire",           4},
+        {8,  "sim/cockpit/warnings/annunciators/fire_warning",          4},
+        {9,  "sim/cockpit/warnings/annunciators/door",                  2},
+        {10, "sim/cockpit/warnings/annunciators/generator",             2},
+        {11, "sim/cockpit/warnings/annunciators/anti_ice",              2},
+        {12, "sim/cockpit/warnings/annunciators/hydraulic_pressure",    4},
+        {13, "sim/cockpit/warnings/annunciators/hydraulic_quantity",    4},
+        {14, "sim/cockpit/warnings/annunciators/cabin_altitude",        4},
+        {15, "sim/cockpit/warnings/annunciators/fuel_quantity",         2},
+        {16, "sim/cockpit/warnings/annunciators/oil_pressure",          2},
+        {17, "sim/cockpit/warnings/annunciators/oil_temperature",       2},
+        {18, "sim/cockpit/warnings/annunciators/voltage",               2},
+        {19, "sim/cockpit/warnings/annunciators/pressurization",        4},
+        {20, "sim/cockpit/warnings/annunciators/ice",                   2},
+        /* Hydraulic system numeric values */
+        {21, "sim/cockpit2/hydraulics/indicators/hydraulic_pressure_psi[0]", 4},
+        {22, "sim/cockpit2/hydraulics/indicators/hydraulic_pressure_psi[1]", 4},
+        {23, "sim/cockpit2/hydraulics/indicators/hydraulic_fluid_ratio[0]",  2},
+        {24, "sim/cockpit2/hydraulics/indicators/hydraulic_fluid_ratio[1]",  2},
+    };
+
+    int num_subs = (int)(sizeof(subs) / sizeof(subs[0]));
+    int ok = 0;
+
+    for (int i = 0; i < num_subs; i++) {
+        if (xplane_rref_subscribe(sock, xp_host, xp_port,
+                                  subs[i].path, subs[i].id, subs[i].freq) == 0) {
+            ok++;
+        }
+        /* Small delay between requests to avoid flooding XP's buffer */
+        SDL_Delay(10);
+    }
+
+    LOG_INFO("RREF subscribed %d/%d alert datarefs", ok, num_subs);
+    return (ok > 0) ? 0 : -1;
 }
