@@ -418,7 +418,7 @@ static void draw_attitude_indicator(SDL_Renderer* r, const PFDLayout* lay,
     }
 
     /* ---- Stall / Overspeed Warning Text ---- */
-    if (f->ias_kts < 110.0f && f->altitude_agl_ft > 0.0f) {
+    if (f->ias_kts < 110.0f && f->altitude_agl_ft > 10.0f) {
         set_color(r, COL_TEXT_RED);
         font_draw_scaled_aligned(r, cx, cy - R / 2, "STALL", 1.0f, FONT_BOLD, FONT_ALIGN_CENTER);
     } else if (f->ias_kts > 340.0f) {
@@ -470,7 +470,7 @@ static void draw_airspeed_tape(SDL_Renderer* r, const PFDLayout* lay,
     int line_x = tape_r - line_w - 2; /* Inside the right edge of the tape (closest to attitude indicator) */
 
     /* Draw red dashed band for speeds < 110 kts (Stall) */
-    if (f->altitude_agl_ft > 0.0f && ias < stall_spd + 80.0f) {
+    if (f->altitude_agl_ft > 10.0f && ias < stall_spd + 80.0f) {
         set_color(r, COL_TEXT_RED);
         for (float s = stall_spd; s >= ias - 80.0f; s -= 4.0f) {
             float y_top = (float)tape_mid - (s - ias) * px_kt;

@@ -53,7 +53,7 @@ extern void        fmc_state_free(FMCState* state);
  */
 static int init_sdl(App* app)
 {
-    Uint32 flags = SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER;
+    Uint32 flags = SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER | SDL_INIT_AUDIO;
     if (SDL_Init(flags) != 0) {
         fprintf(stderr, "FATAL: SDL_Init failed: %s\n", SDL_GetError());
         return -1;

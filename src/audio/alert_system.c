@@ -729,8 +729,10 @@ static void audio_callback(void* userdata, Uint8* stream, int len)
                 if (t->samples_total <= 0) progress = 0.0f;
                 if (progress > 1.0f) progress = 1.0f;
 
-                float freq = t->freq_start
-                             + (t->freq_end - t->freq_start) * progress;
+                float freq = t->freq;
+                if (t->freq_start > 0.0f || t->freq_end > 0.0f) {
+                    freq = t->freq_start + (t->freq_end - t->freq_start) * progress;
+                }
 
                 /* Phase increment */
                 float phase_inc = freq / (float)SAMPLE_RATE;
@@ -936,7 +938,7 @@ static void evaluate_alerts(AlertSystem* as, const FlightDataValues* fd, float d
     }
 
     /* --- Stall Warning ----------------------------------------------------- */
-    if (((ias_kts < 110.0f && agl_ft > 0.0f) || fd->dref_stall_warning) && as->cooldown_timer[ALERT_STALL] <= 0.0f) {
+    if ((ias_kts < 110.0f || fd->dref_stall_warning) && agl_ft > 10.0f && as->cooldown_timer[ALERT_STALL] <= 0.0f) {
         tone_start(as, ALERT_STALL);
         as->cooldown_timer[ALERT_STALL] = alert_cooldown[ALERT_STALL];
         LOG_DEBUG("ALERT: STALL (IAS=%.0f)", (double)ias_kts);
@@ -1162,7 +1164,7 @@ void alert_system_get_active_alerts(const AlertSystem* as,
         out_states[ALERT_ID_OVERSPEED] = 1;
 
     /* STALL: IAS < 110 kts, airborne */
-    if (ias_kts < 110.0f && agl_ft > 0.0f)
+    if (ias_kts < 110.0f && agl_ft > 10.0f)
         out_states[ALERT_ID_STALL] = 1;
 
     /* MINIMUMS: AGL within ±100ft of 200ft, descending */
@@ -1293,7 +1295,7 @@ void alert_system_get_active_alerts(const AlertSystem* as,
     if (fd->dref_anti_ice)
         out_states[ALERT_ID_ANTI_ICE_FAULT] = 1;
 
-    if (fd->dref_stall_warning)
+    if (fd->dref_stall_warning && agl_ft > 10.0f)
         out_states[ALERT_ID_STALL_WARNING] = 1;
 
     /* Fire alerts: use engine_fire + fire_warning + apu_fire (derived) */
