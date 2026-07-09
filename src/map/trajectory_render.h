@@ -38,14 +38,19 @@ typedef struct FMCState         FMCState;
  * @param map_ox       Map area left edge in window coords (for offset).
  * @param map_oy       Map area top edge in window coords.
  * @param fd           Current flight data snapshot.
- * @param fmc          FMC state (may be NULL → skip route drawing).
+ * @param fmc          FMC state (may be NULL → skip FMC route drawing).
+ * @param track        GPS breadcrumb trail (array of lat/lon pairs).
+ * @param track_count  Number of entries in track array.
  */
 void trajectory_render(SDL_Renderer* r,
                        double center_lat, double center_lon,
                        int zoom, int map_w, int map_h,
                        int map_ox, int map_oy,
                        const FlightDataValues* fd,
-                       const FMCState* fmc);
+                       const FMCState* fmc,
+                       const double* track_lats,
+                       const double* track_lons,
+                       int track_count);
 
 /**
  * @brief Draw the aircraft icon (filled triangle) at the given screen position.

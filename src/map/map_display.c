@@ -9,6 +9,7 @@
 #include "map_display.h"
 #include "geo_projection.h"
 #include "trajectory_render.h"
+#include "weather_fetch.h"
 #include "http.h"
 #include "config.h"
 #include "utils/logger.h"
@@ -19,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 
 /* =========================================================================
  *  Constants
@@ -313,15 +315,108 @@ static void trigger_fetch(MapDisplay* md)
     }
 }
 
+/* =========================================================================
+ *  Zoom cycle (30s total):
+ *    0–10s : original size
+ *   10–20s : 1.5× zoom (no overlay)
+ *   20–30s : 1.5× zoom + weather/time overlay
+ * ========================================================================= */
+
+#define CABIN_ZOOM_CYCLE_S   30.0
+#define CABIN_ZOOM_FACTOR    2.0
+
 static void update_auto_zoom(MapDisplay* md)
 {
     if (md->base_zoom <= 0.0) return;
-    double elapsed = (double)(SDL_GetTicks64() - md->zoom_start_ms) / 1000.0;
-    double phase = fmod(elapsed, 60.0) / 60.0;
-    int z = (int)(md->base_zoom + sin(phase * M_PI * 2.0) * 2.5 + 0.5);
+    double elapsed = fmod((double)(SDL_GetTicks64() - md->zoom_start_ms) / 1000.0,
+                          CABIN_ZOOM_CYCLE_S);
+    double target = (elapsed >= 10.0) ? (md->base_zoom * CABIN_ZOOM_FACTOR)
+                                      : md->base_zoom;
+    double alpha = 0.40;
+    double cur = (double)md->zoom;
+    double next = cur + (target - cur) * alpha;
+    int z = (int)(next + 0.5);
     if (z < CABIN_ZOOM_MIN) z = CABIN_ZOOM_MIN;
     if (z > CABIN_ZOOM_MAX) z = CABIN_ZOOM_MAX;
     md->zoom = z;
+}
+
+/** Returns 1 during 20–30s overlay phase. */
+static int is_overlay_phase(MapDisplay* md)
+{
+    double elapsed = fmod((double)(SDL_GetTicks64() - md->zoom_start_ms) / 1000.0,
+                          CABIN_ZOOM_CYCLE_S);
+    return (elapsed >= 20.0) ? 1 : 0;
+}
+
+/* =========================================================================
+ *  Weather fetch (background thread, one-shot)
+ * ========================================================================= */
+
+typedef struct {
+    MapDisplay* md;
+    char        api_key[64];
+    double      dep_lat, dep_lon;
+    double      arr_lat, arr_lon;
+} WeatherFetchCtx;
+
+static int weather_fetch_thread_func(void* data)
+{
+    WeatherFetchCtx* ctx = (WeatherFetchCtx*)data;
+    MapDisplay* md = ctx->md;
+
+    /* Fetch departure weather */
+    weather_fetch_for_coords(ctx->api_key, ctx->dep_lat, ctx->dep_lon,
+        md->weather_dep.weather, sizeof(md->weather_dep.weather),
+        &md->weather_dep.temp_c, &md->weather_dep.humidity);
+
+    /* Fetch arrival weather */
+    weather_fetch_for_coords(ctx->api_key, ctx->arr_lat, ctx->arr_lon,
+        md->weather_arr.weather, sizeof(md->weather_arr.weather),
+        &md->weather_arr.temp_c, &md->weather_arr.humidity);
+
+    md->last_weather_fetch_ms = SDL_GetTicks64();
+    SDL_AtomicSet(&md->weather_fetching, 0);
+    free(ctx);
+    return 0;
+}
+
+/** Trigger weather fetch if due (>10 min) and flight plan has coords. */
+static void check_weather_fetch(MapDisplay* md)
+{
+    if (SDL_AtomicGet(&md->weather_fetching)) return;  /* already running */
+    if (!md->fmc || md->fmc->flight_plan.waypoint_count < 2) return;
+    if (!md->api_key[0]) return;
+
+    uint64_t now = SDL_GetTicks64();
+    if (md->last_weather_fetch_ms != 0 &&
+        now - md->last_weather_fetch_ms < 600000ULL) return;  /* 10 min throttle */
+
+    /* Route change → force refresh */
+    if (md->last_weather_fetch_ms != 0 &&
+        md->last_wpt_count == md->fmc->flight_plan.waypoint_count) {
+        /* Same route, throttle applies */
+    }
+
+    const FlightPlan* fp = &md->fmc->flight_plan;
+    WeatherFetchCtx* ctx = (WeatherFetchCtx*)calloc(1, sizeof(WeatherFetchCtx));
+    if (!ctx) return;
+    ctx->md = md;
+    strncpy(ctx->api_key, md->api_key, sizeof(ctx->api_key) - 1);
+    ctx->dep_lat = fp->waypoints[0].pos.lat_deg;
+    ctx->dep_lon = fp->waypoints[0].pos.lon_deg;
+    ctx->arr_lat = fp->waypoints[fp->waypoint_count - 1].pos.lat_deg;
+    ctx->arr_lon = fp->waypoints[fp->waypoint_count - 1].pos.lon_deg;
+
+    SDL_AtomicSet(&md->weather_fetching, 1);
+    SDL_Thread* th = SDL_CreateThread(weather_fetch_thread_func,
+                                      "WeatherFetch", ctx);
+    if (!th) {
+        SDL_AtomicSet(&md->weather_fetching, 0);
+        free(ctx);
+    } else {
+        SDL_DetachThread(th);  /* fire-and-forget */
+    }
 }
 
 /* =========================================================================
@@ -452,6 +547,104 @@ static void render_progress(MapDisplay* md)
 }
 
 /* =========================================================================
+ *  Weather / Time overlay (shown during zoomed phase)
+ * ========================================================================= */
+
+static void render_weather_overlay(MapDisplay* md)
+{
+    SDL_Renderer* r = md->renderer;
+    SDL_Rect* mr = &md->map_rect;
+    FlightDataValues fd;
+    SDL_LockMutex(md->data_mutex); fd = md->last_fd; SDL_UnlockMutex(md->data_mutex);
+
+    /* Semi-transparent dark overlay on upper portion of map */
+    int overlay_h = mr->h * 2 / 5;
+    if (overlay_h > 300) overlay_h = 300;
+    SDL_Rect shade = { mr->x, mr->y, mr->w, overlay_h };
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(r, 0, 0, 0, 160);
+    SDL_RenderFillRect(r, &shade);
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
+
+    /* Departure / Arrival info */
+    const char* dep_icao = "----";
+    const char* arr_icao = "----";
+    if (md->fmc && md->fmc->flight_plan.waypoint_count >= 2) {
+        dep_icao = md->fmc->flight_plan.departure.icao;
+        arr_icao = md->fmc->flight_plan.arrival.icao;
+    }
+
+    int col_w = mr->w / 2;
+    int cx_left  = mr->x + col_w / 2;
+    int cx_right = mr->x + col_w + col_w / 2;
+
+    /* --- Departure (left column) --- */
+    SDL_SetRenderDrawColor(r, 138, 180, 216, 255);
+    font_draw(r, cx_left, mr->y + 18, "DEPARTURE", 9, FONT_REGULAR);
+
+    SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
+    font_draw(r, cx_left, mr->y + 42, dep_icao, 20, FONT_BOLD);
+
+    /* Departure weather */
+    char dep_wx[64] = "--";
+    if (md->weather_dep.temp_c > -99.0f && md->weather_dep.weather[0])
+        snprintf(dep_wx, sizeof(dep_wx), "%s  %.0f°C",
+                 md->weather_dep.weather, (double)md->weather_dep.temp_c);
+    SDL_SetRenderDrawColor(r, 200, 210, 220, 255);
+    font_draw(r, cx_left, mr->y + 66, dep_wx, 10, FONT_REGULAR);
+
+    /* Departure time — local system time */
+    char dep_time[16] = "--:--";
+    {
+        time_t now_tt = time(NULL);
+        struct tm* tm_info = localtime(&now_tt);
+        if (tm_info) snprintf(dep_time, sizeof(dep_time), "%02d:%02d LT",
+                              tm_info->tm_hour, tm_info->tm_min);
+    }
+    SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
+    font_draw(r, cx_left, mr->y + 90, dep_time, 16, FONT_BOLD);
+
+    /* --- Arrival (right column) --- */
+    SDL_SetRenderDrawColor(r, 138, 180, 216, 255);
+    font_draw(r, cx_right, mr->y + 18, "ARRIVAL", 9, FONT_REGULAR);
+
+    SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
+    font_draw(r, cx_right, mr->y + 42, arr_icao, 20, FONT_BOLD);
+
+    /* Arrival weather */
+    char arr_wx[64] = "--";
+    if (md->weather_arr.temp_c > -99.0f && md->weather_arr.weather[0])
+        snprintf(arr_wx, sizeof(arr_wx), "%s  %.0f°C",
+                 md->weather_arr.weather, (double)md->weather_arr.temp_c);
+    SDL_SetRenderDrawColor(r, 200, 210, 220, 255);
+    font_draw(r, cx_right, mr->y + 66, arr_wx, 10, FONT_REGULAR);
+
+    /* Arrival time — ETA from flight plan or computed */
+    char arr_time[16] = "--:--";
+    if (fd.gs_kts > 30.0f) {
+        double remain_nm = 0.0;
+        if (md->fmc && md->fmc->flight_plan.waypoint_count >= 2) {
+            const FlightPlan* fp = &md->fmc->flight_plan;
+            remain_nm = geo_haversine_nm(fd.lat_deg, fd.lon_deg,
+                fp->waypoints[fp->waypoint_count-1].pos.lat_deg,
+                fp->waypoints[fp->waypoint_count-1].pos.lon_deg);
+        }
+        if (remain_nm > 1.0) {
+            double hrs = remain_nm / (double)fd.gs_kts;
+            int h = (int)hrs, m = (int)((hrs - (double)h) * 60.0);
+            snprintf(arr_time, sizeof(arr_time), "+%02d:%02d", h, m);
+        }
+    }
+    SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
+    font_draw(r, cx_right, mr->y + 90, arr_time, 16, FONT_BOLD);
+
+    /* Divider line */
+    SDL_SetRenderDrawColor(r, 42, 106, 172, 100);
+    SDL_Rect div = { mr->x + col_w, mr->y + 8, 1, overlay_h - 16 };
+    SDL_RenderFillRect(r, &div);
+}
+
+/* =========================================================================
  *  Public render entry
  * ========================================================================= */
 
@@ -467,9 +660,37 @@ void map_display_render(MapDisplay* md)
 
     drain_pending(md);
     interpolate(md);
+
+    /* Record GPS track breadcrumb (every ~2 seconds, or when moved >0.5 NM) */
+    {
+        FlightDataValues fd;
+        SDL_LockMutex(md->data_mutex); fd = md->last_fd; SDL_UnlockMutex(md->data_mutex);
+        uint64_t now = SDL_GetTicks64();
+        int should_add = 0;
+        if (md->track_count == 0) {
+            should_add = 1;
+        } else if (now - md->last_track_add_ms > 2000) {
+            double d = geo_haversine_nm(md->track[md->track_count-1].lat,
+                                        md->track[md->track_count-1].lon,
+                                        md->disp_lat, md->disp_lon);
+            if (d > 0.5) should_add = 1;
+        }
+        if (should_add && fd.lat_deg != 0.0 && fd.lon_deg != 0.0) {
+            if (md->track_count < CABIN_TRACK_MAX) {
+                md->track[md->track_count].lat = md->disp_lat;
+                md->track[md->track_count].lon = md->disp_lon;
+                md->track_count++;
+                md->last_track_add_ms = now;
+            }
+        }
+    }
+
     update_auto_zoom(md);
 
-    /* Route change detection → reset base zoom */
+    /* Check weather fetch (throttled to 10 min) */
+    check_weather_fetch(md);
+
+    /* Route change detection → reset base zoom + force weather refresh */
     if (md->fmc && md->fmc->flight_plan.waypoint_count >= 2) {
         const FlightPlan* fp = &md->fmc->flight_plan;
         if (fp->waypoint_count != md->last_wpt_count ||
@@ -478,8 +699,9 @@ void map_display_render(MapDisplay* md)
             md->last_wpt_count = fp->waypoint_count;
             strncpy(md->last_dep_icao, fp->departure.icao, 7);
             strncpy(md->last_arr_icao, fp->arrival.icao, 7);
-            md->base_zoom = (double)md->zoom;
+            /* Keep base_zoom unchanged — don't capture inflated zoom from cycle */
             md->zoom_start_ms = SDL_GetTicks64();
+            md->last_weather_fetch_ms = 0;  /* force weather re-fetch on route change */
         }
     }
 
@@ -496,10 +718,33 @@ void map_display_render(MapDisplay* md)
     SDL_LockMutex(md->data_mutex); fd = md->last_fd; SDL_UnlockMutex(md->data_mutex);
     fd.lat_deg = md->disp_lat;
     fd.lon_deg = md->disp_lon;
+
+    /* Build track lat/lon arrays for trajectory_render */
+    double* track_lats = NULL;
+    double* track_lons = NULL;
+    if (md->track_count >= 2) {
+        track_lats = (double*)malloc((size_t)md->track_count * 2 * sizeof(double));
+        track_lons = track_lats + md->track_count;
+        if (track_lats) {
+            for (int i = 0; i < md->track_count; i++) {
+                track_lats[i] = md->track[i].lat;
+                track_lons[i] = md->track[i].lon;
+            }
+        }
+    }
+
     trajectory_render(md->renderer, md->disp_lat, md->disp_lon, md->zoom,
                       md->map_rect.w, md->map_rect.h,
                       md->map_rect.x, md->map_rect.y,
-                      &fd, md->fmc);
+                      &fd, md->fmc,
+                      track_lats, track_lons, md->track_count);
+
+    free(track_lats);
+
+    /* Weather overlay — only during 20–30s of cycle */
+    if (is_overlay_phase(md)) {
+        render_weather_overlay(md);
+    }
 
     render_header(md);
     render_progress(md);

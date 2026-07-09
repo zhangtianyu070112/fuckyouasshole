@@ -65,6 +65,12 @@ typedef struct MapDisplay {
     /* --- Interpolated position --- */
     double        disp_lat, disp_lon;
 
+    /* --- GPS track history --- */
+    #define CABIN_TRACK_MAX  2048
+    struct { double lat; double lon; } track[CABIN_TRACK_MAX];
+    int           track_count;
+    uint64_t      last_track_add_ms;
+
     /* --- FMC --- */
     FMCState*     fmc;
 
@@ -78,9 +84,10 @@ typedef struct MapDisplay {
     char          last_arr_icao[8];
 
     /* --- Weather --- */
-    WeatherInfo   weather;
-    uint64_t      last_weather_fetch;
-    int           weather_interval_s;
+    WeatherInfo   weather_dep;     /* Departure airport weather */
+    WeatherInfo   weather_arr;     /* Arrival airport weather */
+    uint64_t      last_weather_fetch_ms;
+    SDL_atomic_t  weather_fetching;  /* 1 = thread is running */
 } MapDisplay;
 
 MapDisplay* map_display_create(const Config* cfg, FMCState* fmc);

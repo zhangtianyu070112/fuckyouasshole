@@ -156,14 +156,17 @@ static HTTPResponse* http_recv_response(int sock_fd)
         }
     }
 
-    /* Find body (after \r\n\r\n) */
+    /* Find body (after \r\n\r\n) — use byte offset, NOT strlen (binary data!) */
     const char* body_start = strstr(buf, "\r\n\r\n");
     if (body_start) {
         body_start += 4;
-        resp->body_len = strlen(body_start);
-        resp->body = malloc(resp->body_len + 1);
-        if (resp->body) {
-            memcpy(resp->body, body_start, resp->body_len + 1);
+        size_t header_len = (size_t)(body_start - buf);
+        resp->body_len = (header_len < total_read) ? (total_read - header_len) : 0;
+        if (resp->body_len > 0) {
+            resp->body = malloc(resp->body_len);
+            if (resp->body) {
+                memcpy(resp->body, body_start, resp->body_len);
+            }
         }
     }
 

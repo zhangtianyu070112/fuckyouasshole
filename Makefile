@@ -38,6 +38,24 @@ ifneq ($(SDL_GFX_CFLAGS),)
   CFLAGS_GFX := -DHAS_SDL2_GFX
 endif
 
+# libcurl (HTTPS for 高德 REST APIs)
+CURL_CFLAGS := $(shell pkg-config --cflags libcurl 2>/dev/null)
+CURL_LIBS   := $(shell pkg-config --libs   libcurl 2>/dev/null)
+ifeq ($(CURL_LIBS),)
+  CURL_LIBS := -lcurl
+endif
+INC_FLAGS += $(CURL_CFLAGS)
+LDFLAGS   += $(CURL_LIBS)
+
+# cJSON (JSON parsing for weather API)
+CJSON_CFLAGS := $(shell pkg-config --cflags cjson 2>/dev/null)
+CJSON_LIBS   := $(shell pkg-config --libs   cjson 2>/dev/null)
+ifeq ($(CJSON_LIBS),)
+  CJSON_LIBS := -lcjson
+endif
+INC_FLAGS += $(CJSON_CFLAGS)
+LDFLAGS   += $(CJSON_LIBS)
+
 CFLAGS := $(WARN_FLAGS) $(OPT_FLAGS) $(INC_FLAGS) $(CFLAGS_GFX)
 
 # -----------------------------------------------------------------------------

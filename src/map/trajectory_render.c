@@ -229,20 +229,44 @@ void trajectory_render(SDL_Renderer* r,
                        int zoom, int map_w, int map_h,
                        int map_ox, int map_oy,
                        const FlightDataValues* fd,
-                       const FMCState* fmc)
+                       const FMCState* fmc,
+                       const double* track_lats,
+                       const double* track_lons,
+                       int track_count)
 {
     if (!r || !fd) return;
 
-    /* If no FMC or no flight plan, just draw the aircraft if we have position */
-    if (!fmc || fmc->flight_plan.waypoint_count < 2) {
-        if (fd->lat_deg != 0.0 || fd->lon_deg != 0.0) {
-            int ax, ay;
-            geo_to_screen(fd->lat_deg, fd->lon_deg,
-                         center_lat, center_lon, zoom, map_w, map_h, &ax, &ay);
-            ax += map_ox;
-            ay += map_oy;
-            trajectory_draw_aircraft(r, ax, ay, fd->heading_true_deg, 1.0f);
+    /* --- GPS breadcrumb trail (always drawn) --- */
+    if (track_count >= 2 && track_lats && track_lons) {
+        SDL_SetRenderDrawColor(r, COL_FLOWN_R, COL_FLOWN_G,
+                               COL_FLOWN_B, COL_FLOWN_A);
+        for (int i = 0; i < track_count - 1; i++) {
+            int x1, y1, x2, y2;
+            geo_to_screen(track_lats[i], track_lons[i],
+                         center_lat, center_lon, zoom, map_w, map_h, &x1, &y1);
+            geo_to_screen(track_lats[i+1], track_lons[i+1],
+                         center_lat, center_lon, zoom, map_w, map_h, &x2, &y2);
+            x1 += map_ox; y1 += map_oy;
+            x2 += map_ox; y2 += map_oy;
+            /* Thick lines */
+            for (int t = -1; t <= 1; t++) {
+                SDL_RenderDrawLine(r, x1, y1 + t, x2, y2 + t);
+            }
         }
+    }
+
+    /* --- Aircraft icon (always drawn if we have position) --- */
+    if (fd->lat_deg != 0.0 || fd->lon_deg != 0.0) {
+        int ax, ay;
+        geo_to_screen(fd->lat_deg, fd->lon_deg,
+                     center_lat, center_lon, zoom, map_w, map_h, &ax, &ay);
+        ax += map_ox;
+        ay += map_oy;
+        trajectory_draw_aircraft(r, ax, ay, fd->heading_true_deg, 1.0f);
+    }
+
+    /* If no FMC or no flight plan, we're done (track + aircraft only) */
+    if (!fmc || fmc->flight_plan.waypoint_count < 2) {
         return;
     }
 
@@ -310,16 +334,6 @@ void trajectory_render(SDL_Renderer* r,
     SDL_SetRenderDrawColor(r, COL_ARR_R, COL_ARR_G, COL_ARR_B, COL_ARR_A);
     draw_filled_circle(r, sx[n-1], sy[n-1], 8);
     draw_circle_outline(r, sx[n-1], sy[n-1], 8, 2);
-
-    /* 6. Aircraft icon at current position */
-    if (fd->lat_deg != 0.0 || fd->lon_deg != 0.0) {
-        int ax, ay;
-        geo_to_screen(fd->lat_deg, fd->lon_deg,
-                     center_lat, center_lon, zoom, map_w, map_h, &ax, &ay);
-        ax += map_ox;
-        ay += map_oy;
-        trajectory_draw_aircraft(r, ax, ay, fd->heading_true_deg, 1.0f);
-    }
 
     free(sx);
     free(sy);
