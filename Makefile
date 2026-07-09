@@ -18,11 +18,16 @@ endif
 WARN_FLAGS   := -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wstrict-prototypes -Wmissing-prototypes
 OPT_FLAGS    := -O2
 DBG_FLAGS    := -g -O0 -DDEBUG
-INC_FLAGS    := -Isrc $(SDL_CFLAGS)
+
+# Include paths: src/ for "data/xxx.h" style, instruments/ for instrument.h,
+# build/<module>/ for module headers (config.h, app.h, event.h, thread.h)
+MOD_NAMES    := config event main thread app
+MOD_INC      := $(foreach mod,$(MOD_NAMES),-Ibuild/$(mod))
+INC_FLAGS    := -Isrc -Iinstruments $(MOD_INC) $(SDL_CFLAGS)
 LDFLAGS      := -lws2_32 -lm $(SDL_LIBS)
 
 # If SDL2_gfx is available, include it
-SDL_GFX_CFLAGS := $(shell pkg-config --cflags SDL2_gfx 2>/dev/null)  
+SDL_GFX_CFLAGS := $(shell pkg-config --cflags SDL2_gfx 2>/dev/null)
 SDL_GFX_LIBS   := $(shell pkg-config --libs   SDL2_gfx 2>/dev/null)
 ifeq ($(SDL_GFX_LIBS),)
   SDL_GFX_LIBS := -lSDL2_gfx
@@ -36,12 +41,29 @@ endif
 CFLAGS := $(WARN_FLAGS) $(OPT_FLAGS) $(INC_FLAGS) $(CFLAGS_GFX)
 
 # -----------------------------------------------------------------------------
-# Source files (auto-discovered)
+# Source files
 # -----------------------------------------------------------------------------
-SRC_DIRS := src src/utils src/config src/net src/instruments src/data src/ds src/map src/audio src/cabin
+
+# Existing subdirectory modules — .o next to .c in src/<dir>/
+SRC_DIRS := src/utils src/net src/data src/ds src/map src/audio
 SRCS     := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.c))
 OBJS     := $(SRCS:.c=.o)
 DEPS     := $(SRCS:.c=.d)
+
+# Root-level modules moved into src/<module>/ — .o in build/<module>/
+MOD_SRCS  := $(foreach mod,$(MOD_NAMES),$(wildcard src/$(mod)/*.c))
+MOD_OBJS  := $(patsubst src/%.c,build/%.o,$(MOD_SRCS))
+MOD_DEPS  := $(MOD_OBJS:.o=.d)
+
+# Instrument source directories — compiled to build/<instrument>/
+INST_NAMES := EICAS FMC ND PFD
+INST_SRCS  := $(foreach inst,$(INST_NAMES),$(wildcard instruments/$(inst)/*.c))
+INST_OBJS  := $(patsubst instruments/%.c,build/%.o,$(INST_SRCS))
+INST_DEPS  := $(INST_OBJS:.o=.d)
+
+# Combined lists
+OBJS_ALL := $(OBJS) $(MOD_OBJS) $(INST_OBJS)
+DEPS_ALL := $(DEPS) $(MOD_DEPS) $(INST_DEPS)
 
 # -----------------------------------------------------------------------------
 # Targets
@@ -50,18 +72,30 @@ DEPS     := $(SRCS:.c=.d)
 
 all: $(BIN)
 
-$(BIN): $(OBJS)
+$(BIN): $(OBJS_ALL)
 	@echo "  LINK    $@"
-	@$(CC) $(OBJS) -o $@ $(LDFLAGS)
+	@$(CC) $(OBJS_ALL) -o $@ $(LDFLAGS)
 	@echo "  ✓ Build complete: $(BIN)"
 
-# Pattern rule for .o + .d generation
+# Pattern rule for existing subdirectory sources — .o next to .c
 %.o: %.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
+# Pattern rule for root-level module sources — .o in build/<module>/
+build/%.o: src/%.c
+	@echo "  CC      $<"
+	@mkdir -p $(dir $@)
+	@$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
+# Pattern rule for instrument sources — .o in build/<instrument>/
+build/%.o: instruments/%.c
+	@echo "  CC      $<"
+	@mkdir -p $(dir $@)
+	@$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
 # Include auto-generated dependency files
--include $(DEPS)
+-include $(DEPS_ALL)
 
 debug: CFLAGS := $(WARN_FLAGS) $(DBG_FLAGS) $(INC_FLAGS) $(CFLAGS_GFX)
 debug: clean all
@@ -74,6 +108,8 @@ run: all
 clean:
 	@echo "  Cleaning..."
 	@rm -f $(OBJS) $(DEPS) $(BIN)
+	@rm -f $(MOD_OBJS) $(MOD_DEPS)
+	@rm -f $(INST_OBJS) $(INST_DEPS)
 	@echo "  ✓ Clean complete"
 
 help:

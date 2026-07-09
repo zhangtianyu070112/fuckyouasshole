@@ -18,9 +18,9 @@
 #define ND_H
 
 #include "instrument.h"
-#include "../data/navdata.h"
-#include "../data/flight_data.h"
-#include "../ds/spatial_hash.h"
+#include "data/navdata.h"
+#include "data/flight_data.h"
+#include "ds/spatial_hash.h"
 
 /* =========================================================================
  *  ND data structure

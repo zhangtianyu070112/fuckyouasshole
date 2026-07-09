@@ -17,8 +17,8 @@
 #include "event.h"
 #include "thread.h"
 #include "utils/logger.h"
-#include "instruments/instrument.h"
-#include "instruments/eicas2.h"
+#include "instrument.h"
+#include "EICAS/eicas2.h"
 #include "data/flight_data.h"
 #include "data/navdata.h"
 #include "ds/spatial_hash.h"
@@ -27,7 +27,7 @@
 #include "net/mock_data.h"
 #include "audio/alert_system.h"
 #include "utils/font_manager.h"
-#include "cabin/cabin_server.h"
+#include "map/map_display.h"
 
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
@@ -608,9 +608,10 @@ static void main_loop(App* app)
             /* alert_system_test_beeps(app->alert_sys, &snapshot); */
         }
 
-        /* 3c. Update Cabin Display Server */
-        if (app->cabin_server) {
-            cabin_server_update_position(app->cabin_server, app->flight_data);
+        /* 3c. Update & render Cabin Map Display */
+        if (app->map_display) {
+            map_display_update_position(app->map_display, &snapshot);
+            map_display_render(app->map_display);
         }
 
         /* 4. Update all instruments */
@@ -1063,8 +1064,8 @@ int app_run_with_config(const char* config_path)
     start_data_source(app);
     fprintf(stderr, "[STARTUP] 7/7 Entering main loop\n");
 
-    /* 8c. Start Cabin Display Server */
-    app->cabin_server = cabin_server_create(app->config, app->fmc_state);
+    /* 8c. Start Cabin Map Display */
+    app->map_display = map_display_create(app->config, app->fmc_state);
 
     /* 9. Main loop */
     main_loop(app);
@@ -1100,10 +1101,10 @@ cleanup:
         app->mock_ctx = NULL;
     }
 
-    /* Stop Cabin Display Server */
-    if (app->cabin_server) {
-        cabin_server_destroy(app->cabin_server);
-        app->cabin_server = NULL;
+    /* Stop Cabin Map Display */
+    if (app->map_display) {
+        map_display_destroy(app->map_display);
+        app->map_display = NULL;
     }
 
     /* Destroy alert system */
