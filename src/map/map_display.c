@@ -1,19 +1,17 @@
 /**
  * @file    map_display.c
- * @brief   Native SDL2 cabin map display — separate SDL window.
+ * @brief   Cabin 3D globe map — OpenGL implementation.
  *
- * Creates an independent always-on-top window for the cabin moving map.
- * Fetches 高德 map tiles via HTTP in a background thread.
+ * Renders a textured UV sphere as the earth with the current texture.
+ * Draws flight route, GPS track, waypoints, and aircraft icon in 3D.
+ * Header, data bar, and progress bar are rendered in 2D orthographic pass.
  */
 
 #include "map_display.h"
-#include "geo_projection.h"
-#include "trajectory_render.h"
 #include "weather_fetch.h"
-#include "http.h"
 #include "config.h"
 #include "utils/logger.h"
-#include "utils/font_manager.h"
+#include "utils/math_util.h"
 
 #include <SDL2/SDL_image.h>
 #include <math.h>
@@ -26,220 +24,197 @@
  *  Constants
  * ========================================================================= */
 
-#define AMAP_TILE_HOST      "webrd01.is.autonavi.com"
-#define AMAP_TILE_PORT      80
-#define AMAP_TILE_PATH_FMT  "/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x=%d&y=%d&z=%d"
-
 #define CABIN_WIN_W         1024
 #define CABIN_WIN_H         680
-#define CABIN_ZOOM_DEFAULT  8
-#define CABIN_ZOOM_MIN      3
-#define CABIN_ZOOM_MAX      17
-#define CABIN_FETCH_MS      5000
-#define CABIN_POS_EASE      0.35f
 #define CABIN_HEADER_H      32
 #define CABIN_DATABAR_H     60
 #define CABIN_PROGRESS_H    3
+
+#define CAMERA_DIST_DEFAULT 1.15f
+#define CAMERA_DIST_MIN     0.6f
+#define CAMERA_DIST_MAX     3.0f
+#define GLOBE_TILT_DEFAULT  22.0f
+
+#define SPHERE_LATS         64
+#define SPHERE_LONS         128
+#define SPHERE_RADIUS       1.0f
+#define ROUTE_OFFSET        0.004f     /* route lines slightly above sphere */
+#define MARKER_OFFSET       0.008f     /* markers slightly above route */
 
 /* =========================================================================
  *  Helpers
  * ========================================================================= */
 
-static void make_tile_path(int tx, int ty, int zoom, char* buf, size_t bufsz)
+static double geo_haversine_nm(double lat1, double lon1,
+                                double lat2, double lon2)
 {
-    snprintf(buf, bufsz, AMAP_TILE_PATH_FMT, tx, ty, zoom);
+    double dlat = (lat2 - lat1) * 0.017453292519943295;
+    double dlon = (lon2 - lon1) * 0.017453292519943295;
+    double a = sin(dlat * 0.5) * sin(dlat * 0.5) +
+               cos(lat1 * 0.017453292519943295) * cos(lat2 * 0.017453292519943295) *
+               sin(dlon * 0.5) * sin(dlon * 0.5);
+    double c = 2.0 * atan2(sqrt(a), sqrt(1.0 - a));
+    return 3440.065 * c;  /* Earth radius in nautical miles */
 }
 
-static void make_tile_key(int tx, int ty, int zoom, char* buf, size_t bufsz)
+/**
+ * @brief Convert lat/lon to 3D point on unit sphere.
+ *        Sphere axis: Y = north pole, XZ = equatorial plane.
+ *        lon=0 maps to +Z, lon=+90 maps to +X.
+ */
+static void latlon_to_sphere(double lat, double lon,
+                              float* x, float* y, float* z)
 {
-    snprintf(buf, bufsz, "%d/%d/%d", zoom, tx, ty);
+    double theta = (90.0 - lat) * 0.017453292519943295;  /* 0 at north pole */
+    double phi   = lon * 0.017453292519943295;
+    *x = (float)(sin(theta) * sin(phi));
+    *y = (float)(cos(theta));
+    *z = (float)(sin(theta) * cos(phi));
 }
 
 /* =========================================================================
- *  Tile fetch (background thread)
+ *  OpenGL text rendering — TTF → GL texture → quad
  * ========================================================================= */
 
-static SDL_Surface* fetch_tile_surface(int tx, int ty, int zoom)
+/**
+ * @brief Render text to a new GL texture, return texture ID.
+ *        Caller must glDeleteTextures when done.
+ */
+static GLuint text_to_texture(TTF_Font* font, const char* text,
+                               SDL_Color fg, int* out_w, int* out_h)
 {
-    char path[256];
-    make_tile_path(tx, ty, zoom, path, sizeof(path));
+    if (!font || !text || !text[0]) return 0;
 
-    HTTPResponse* resp = http_get(AMAP_TILE_HOST, AMAP_TILE_PORT, path);
-    if (!resp || resp->status_code != 200) {
-        if (resp) http_response_free(resp);
-        return NULL;
-    }
-    if (!resp->body || resp->body_len == 0) {
-        http_response_free(resp);
-        return NULL;
-    }
+    SDL_Surface* surf = TTF_RenderUTF8_Blended(font, text, fg);
+    if (!surf) return 0;
 
-    SDL_RWops* rw = SDL_RWFromConstMem(resp->body, (int)resp->body_len);
-    if (!rw) { http_response_free(resp); return NULL; }
+    /* Convert to RGBA for OpenGL */
+    SDL_Surface* rgba = SDL_CreateRGBSurfaceWithFormat(
+        0, surf->w, surf->h, 32, SDL_PIXELFORMAT_RGBA32);
+    if (!rgba) { SDL_FreeSurface(surf); return 0; }
 
-    SDL_Surface* surf = IMG_Load_RW(rw, 0);
-    SDL_RWclose(rw);
-    http_response_free(resp);
-    return surf;
+    SDL_BlitSurface(surf, NULL, rgba, NULL);
+    SDL_FreeSurface(surf);
+
+    GLuint tex;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rgba->w, rgba->h, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, rgba->pixels);
+
+    if (out_w) *out_w = rgba->w;
+    if (out_h) *out_h = rgba->h;
+
+    SDL_FreeSurface(rgba);
+    return tex;
 }
 
-static int tile_fetch_thread_func(void* data)
+/** Draw a GL texture as a 2D quad at (x,y) with given alignment. */
+static void draw_text_quad(GLuint tex, int tex_w, int tex_h,
+                            int x, int y, int align)
 {
-    MapDisplay* md = (MapDisplay*)data;
+    if (!tex) return;
+    int dx = 0;
+    if (align == 0) dx = tex_w / 2;        /* center */
+    else if (align > 0) dx = tex_w;        /* right */
 
-    while (SDL_AtomicGet(&md->fetch_running)) {
-        if (!SDL_AtomicGet(&md->fetch_pending)) {
-            SDL_Delay(250);
-            continue;
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glEnable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glBegin(GL_QUADS);
+    glTexCoord2f(0.0f, 0.0f); glVertex2i(x - dx, y);
+    glTexCoord2f(1.0f, 0.0f); glVertex2i(x - dx + tex_w, y);
+    glTexCoord2f(1.0f, 1.0f); glVertex2i(x - dx + tex_w, y + tex_h);
+    glTexCoord2f(0.0f, 1.0f); glVertex2i(x - dx, y + tex_h);
+    glEnd();
+    glDisable(GL_BLEND);
+    glDisable(GL_TEXTURE_2D);
+}
+
+/* =========================================================================
+ *  Sphere mesh generation
+ * ========================================================================= */
+
+static GLuint build_sphere_display_list(int lats, int lons)
+{
+    GLuint list = glGenLists(1);
+    glNewList(list, GL_COMPILE);
+
+    for (int lat = 0; lat < lats; lat++) {
+        float theta1 = (float)lat       * 3.14159265f / (float)lats;
+        float theta2 = (float)(lat + 1) * 3.14159265f / (float)lats;
+
+        glBegin(GL_TRIANGLE_STRIP);
+        for (int lon = 0; lon <= lons; lon++) {
+            float phi = (float)lon * 2.0f * 3.14159265f / (float)lons;
+
+            float sx1 = sinf(theta1) * sinf(phi);
+            float sy1 = cosf(theta1);
+            float sz1 = sinf(theta1) * cosf(phi);
+            /* U=0.5 at Greenwich (lon=0), wraps via GL_REPEAT */
+            float u1  = 0.5f + (float)lon / (float)lons;
+            /* V=0 at north pole, V=1 at south pole */
+            float v1  = (float)lat / (float)lats;
+
+            float sx2 = sinf(theta2) * sinf(phi);
+            float sy2 = cosf(theta2);
+            float sz2 = sinf(theta2) * cosf(phi);
+            float u2  = 0.5f + (float)lon / (float)lons;
+            float v2  = (float)(lat + 1) / (float)lats;
+
+            glTexCoord2f(u1, v1); glNormal3f(sx1, sy1, sz1);
+            glVertex3f(sx1, sy1, sz1);
+
+            glTexCoord2f(u2, v2); glNormal3f(sx2, sy2, sz2);
+            glVertex3f(sx2, sy2, sz2);
         }
-
-        SDL_LockMutex(md->fetch_mutex);
-        double clat = md->fetch_lat, clon = md->fetch_lon;
-        int zoom = md->fetch_zoom;
-        SDL_AtomicSet(&md->fetch_pending, 0);
-        SDL_UnlockMutex(md->fetch_mutex);
-
-        if (zoom < CABIN_ZOOM_MIN || zoom > CABIN_ZOOM_MAX) continue;
-        if (clat == 0.0 && clon == 0.0) continue;
-
-        double ctx, cty;
-        geo_to_tile(clat, clon, zoom, &ctx, &cty);
-        int cx = (int)floor(ctx), cy = (int)floor(cty);
-        int max_tile = (1 << zoom) - 1;
-
-        for (int dy = -1; dy <= 1; dy++) {
-            for (int dx = -1; dx <= 1; dx++) {
-                int tx = cx + dx, ty = cy + dy;
-                if (tx < 0 || tx > max_tile || ty < 0 || ty > max_tile) continue;
-
-                SDL_Surface* surf = fetch_tile_surface(tx, ty, zoom);
-                if (!surf) continue;
-
-                char key[32];
-                make_tile_key(tx, ty, zoom, key, sizeof(key));
-
-                SDL_LockMutex(md->pending_mutex);
-                if (md->pending_count < CABIN_PENDING_MAX) {
-                    md->pending[md->pending_count].surf = surf;
-                    strncpy(md->pending[md->pending_count].key, key, 31);
-                    md->pending[md->pending_count].key[31] = '\0';
-                    md->pending_count++;
-                } else {
-                    SDL_FreeSurface(surf);
-                }
-                SDL_UnlockMutex(md->pending_mutex);
-            }
-        }
+        glEnd();
     }
-    return 0;
+
+    glEndList();
+    return list;
 }
 
 /* =========================================================================
- *  Create / Destroy
+ *  Earth texture loading
  * ========================================================================= */
 
-MapDisplay* map_display_create(const Config* cfg, FMCState* fmc)
+static GLuint load_earth_texture(const char* path)
 {
-    if (!cfg) return NULL;
-
-    const char* api_key = config_get_str(cfg, "map", "amap_api_key", "");
-    int zoom     = (int)config_get_int(cfg, "map", "map_zoom", CABIN_ZOOM_DEFAULT);
-    int interval = (int)config_get_int(cfg, "map", "map_update_ms", CABIN_FETCH_MS);
-    if (zoom < CABIN_ZOOM_MIN) zoom = CABIN_ZOOM_MIN;
-    if (zoom > CABIN_ZOOM_MAX) zoom = CABIN_ZOOM_MAX;
-
-    MapDisplay* md = (MapDisplay*)calloc(1, sizeof(MapDisplay));
-    if (!md) return NULL;
-
-    strncpy(md->api_key, api_key, sizeof(md->api_key) - 1);
-    md->zoom = zoom;
-    md->tile_size = GEO_TILE_SIZE;
-    md->fetch_interval_ms = interval;
-    md->fmc = fmc;
-
-    /* Create always-on-top window so it's visible above fullscreen cockpit */
-    md->window = SDL_CreateWindow("Cabin Moving Map",
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        CABIN_WIN_W, CABIN_WIN_H,
-        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALWAYS_ON_TOP);
-    if (!md->window) {
-        LOG_ERROR("MapDisplay: SDL_CreateWindow failed: %s", SDL_GetError());
-        free(md); return NULL;
+    SDL_Surface* surf = IMG_Load(path);
+    if (!surf) {
+        LOG_WARN("Failed to load earth texture: %s — %s", path, IMG_GetError());
+        return 0;
     }
 
-    md->renderer = SDL_CreateRenderer(md->window, -1,
-        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!md->renderer) {
-        LOG_ERROR("MapDisplay: SDL_CreateRenderer failed: %s", SDL_GetError());
-        SDL_DestroyWindow(md->window); free(md); return NULL;
-    }
+    /* Convert to RGB for GL */
+    SDL_Surface* rgb = SDL_CreateRGBSurfaceWithFormat(
+        0, surf->w, surf->h, 24, SDL_PIXELFORMAT_RGB24);
+    if (!rgb) { SDL_FreeSurface(surf); return 0; }
+    SDL_BlitSurface(surf, NULL, rgb, NULL);
+    SDL_FreeSurface(surf);
 
-    SDL_GetWindowSize(md->window, &md->win_w, &md->win_h);
-    md->map_rect.x = 0;
-    md->map_rect.y = CABIN_HEADER_H;
-    md->map_rect.w = md->win_w;
-    md->map_rect.h = md->win_h - CABIN_HEADER_H - CABIN_DATABAR_H - CABIN_PROGRESS_H;
-    if (md->map_rect.h < 40) md->map_rect.h = 40;
+    GLuint tex;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gluBuild2DMipmaps(GL_TEXTURE_2D, GL_RGB, rgb->w, rgb->h,
+                      GL_RGB, GL_UNSIGNED_BYTE, rgb->pixels);
 
-    /* Tile cache uses the cabin renderer */
-    md->tile_cache = tile_cache_create(md->renderer);
-    md->data_mutex  = SDL_CreateMutex();
-    md->fetch_mutex = SDL_CreateMutex();
-    md->pending_mutex = SDL_CreateMutex();
-
-    if (!md->tile_cache || !md->data_mutex || !md->fetch_mutex || !md->pending_mutex) {
-        LOG_ERROR("MapDisplay: failed to create subsystems");
-        map_display_destroy(md); return NULL;
-    }
-
-    SDL_AtomicSet(&md->fetch_running, 1);
-    md->fetch_thread = SDL_CreateThread(tile_fetch_thread_func, "MapTileFetch", md);
-    if (!md->fetch_thread) {
-        LOG_ERROR("MapDisplay: SDL_CreateThread failed");
-        map_display_destroy(md); return NULL;
-    }
-
-    md->zoom_start_ms = SDL_GetTicks64();
-    md->base_zoom = (double)zoom;
-
-    LOG_INFO("MapDisplay: created window %dx%d zoom=%d fetch=%dms",
-             md->win_w, md->win_h, zoom, interval);
-    return md;
-}
-
-void map_display_destroy(MapDisplay* md)
-{
-    if (!md) return;
-    SDL_AtomicSet(&md->fetch_running, 0);
-    if (md->fetch_thread) SDL_WaitThread(md->fetch_thread, NULL);
-
-    tile_cache_destroy(md->tile_cache);
-    if (md->data_mutex)    SDL_DestroyMutex(md->data_mutex);
-    if (md->fetch_mutex)   SDL_DestroyMutex(md->fetch_mutex);
-    if (md->pending_mutex) SDL_DestroyMutex(md->pending_mutex);
-    for (int i = 0; i < md->pending_count; i++)
-        if (md->pending[i].surf) SDL_FreeSurface(md->pending[i].surf);
-
-    if (md->renderer) SDL_DestroyRenderer(md->renderer);
-    if (md->window)   SDL_DestroyWindow(md->window);
-    free(md);
-    LOG_INFO("MapDisplay: destroyed");
+    SDL_FreeSurface(rgb);
+    LOG_INFO("Earth texture loaded: %dx%d", surf->w, surf->h);
+    return tex;
 }
 
 /* =========================================================================
- *  Update
- * ========================================================================= */
-
-void map_display_update_position(MapDisplay* md, const FlightDataValues* fd)
-{
-    if (!md || !fd) return;
-    SDL_LockMutex(md->data_mutex);
-    md->last_fd = *fd;
-    SDL_UnlockMutex(md->data_mutex);
-}
-
-/* =========================================================================
- *  Internal helpers
+ *  Progress calculation (adapted from original, uses lat/lon pairs)
  * ========================================================================= */
 
 static void calc_progress(const FlightDataValues* fd, const FMCState* fmc,
@@ -276,7 +251,7 @@ static void calc_progress(const FlightDataValues* fd, const FMCState* fmc,
     if (*progress_pct > 100.0) *progress_pct = 100.0;
 }
 
-static void interpolate(MapDisplay* md)
+static void interpolate_position(MapDisplay* md)
 {
     FlightDataValues fd;
     SDL_LockMutex(md->data_mutex); fd = md->last_fd; SDL_UnlockMutex(md->data_mutex);
@@ -284,73 +259,12 @@ static void interpolate(MapDisplay* md)
     if (md->disp_lat == 0.0 && md->disp_lon == 0.0) {
         md->disp_lat = fd.lat_deg; md->disp_lon = fd.lon_deg; return;
     }
-    md->disp_lat += (fd.lat_deg - md->disp_lat) * CABIN_POS_EASE;
-    md->disp_lon += (fd.lon_deg - md->disp_lon) * CABIN_POS_EASE;
-}
-
-static void drain_pending(MapDisplay* md)
-{
-    SDL_LockMutex(md->pending_mutex);
-    for (int i = 0; i < md->pending_count; i++) {
-        if (md->pending[i].surf) {
-            tile_cache_put(md->tile_cache, md->pending[i].key, md->pending[i].surf);
-            md->pending[i].surf = NULL;
-        }
-    }
-    md->pending_count = 0;
-    SDL_UnlockMutex(md->pending_mutex);
-}
-
-static void trigger_fetch(MapDisplay* md)
-{
-    FlightDataValues fd;
-    SDL_LockMutex(md->data_mutex); fd = md->last_fd; SDL_UnlockMutex(md->data_mutex);
-    if (fd.lat_deg == 0.0 && fd.lon_deg == 0.0) return;
-    if (!SDL_AtomicGet(&md->fetch_pending)) {
-        SDL_LockMutex(md->fetch_mutex);
-        md->fetch_lat = md->disp_lat; md->fetch_lon = md->disp_lon;
-        md->fetch_zoom = md->zoom;
-        SDL_AtomicSet(&md->fetch_pending, 1);
-        SDL_UnlockMutex(md->fetch_mutex);
-    }
+    md->disp_lat += (fd.lat_deg - md->disp_lat) * 0.35f;
+    md->disp_lon += (fd.lon_deg - md->disp_lon) * 0.35f;
 }
 
 /* =========================================================================
- *  Zoom cycle (30s total):
- *    0–10s : original size
- *   10–20s : 1.5× zoom (no overlay)
- *   20–30s : 1.5× zoom + weather/time overlay
- * ========================================================================= */
-
-#define CABIN_ZOOM_CYCLE_S   30.0
-#define CABIN_ZOOM_FACTOR    2.0
-
-static void update_auto_zoom(MapDisplay* md)
-{
-    if (md->base_zoom <= 0.0) return;
-    double elapsed = fmod((double)(SDL_GetTicks64() - md->zoom_start_ms) / 1000.0,
-                          CABIN_ZOOM_CYCLE_S);
-    double target = (elapsed >= 10.0) ? (md->base_zoom * CABIN_ZOOM_FACTOR)
-                                      : md->base_zoom;
-    double alpha = 0.40;
-    double cur = (double)md->zoom;
-    double next = cur + (target - cur) * alpha;
-    int z = (int)(next + 0.5);
-    if (z < CABIN_ZOOM_MIN) z = CABIN_ZOOM_MIN;
-    if (z > CABIN_ZOOM_MAX) z = CABIN_ZOOM_MAX;
-    md->zoom = z;
-}
-
-/** Returns 1 during 20–30s overlay phase. */
-static int is_overlay_phase(MapDisplay* md)
-{
-    double elapsed = fmod((double)(SDL_GetTicks64() - md->zoom_start_ms) / 1000.0,
-                          CABIN_ZOOM_CYCLE_S);
-    return (elapsed >= 20.0) ? 1 : 0;
-}
-
-/* =========================================================================
- *  Weather fetch (background thread, one-shot)
+ *  Weather fetch (background thread, fire-and-forget)
  * ========================================================================= */
 
 typedef struct {
@@ -365,12 +279,10 @@ static int weather_fetch_thread_func(void* data)
     WeatherFetchCtx* ctx = (WeatherFetchCtx*)data;
     MapDisplay* md = ctx->md;
 
-    /* Fetch departure weather */
     weather_fetch_for_coords(ctx->api_key, ctx->dep_lat, ctx->dep_lon,
         md->weather_dep.weather, sizeof(md->weather_dep.weather),
         &md->weather_dep.temp_c, &md->weather_dep.humidity);
 
-    /* Fetch arrival weather */
     weather_fetch_for_coords(ctx->api_key, ctx->arr_lat, ctx->arr_lon,
         md->weather_arr.weather, sizeof(md->weather_arr.weather),
         &md->weather_arr.temp_c, &md->weather_arr.humidity);
@@ -381,28 +293,20 @@ static int weather_fetch_thread_func(void* data)
     return 0;
 }
 
-/** Trigger weather fetch if due (>10 min) and flight plan has coords. */
 static void check_weather_fetch(MapDisplay* md)
 {
-    if (SDL_AtomicGet(&md->weather_fetching)) return;  /* already running */
+    if (SDL_AtomicGet(&md->weather_fetching)) return;
     if (!md->fmc || md->fmc->flight_plan.waypoint_count < 2) return;
-    if (!md->api_key[0]) return;
 
     uint64_t now = SDL_GetTicks64();
     if (md->last_weather_fetch_ms != 0 &&
-        now - md->last_weather_fetch_ms < 600000ULL) return;  /* 10 min throttle */
-
-    /* Route change → force refresh */
-    if (md->last_weather_fetch_ms != 0 &&
-        md->last_wpt_count == md->fmc->flight_plan.waypoint_count) {
-        /* Same route, throttle applies */
-    }
+        now - md->last_weather_fetch_ms < 600000ULL) return;
 
     const FlightPlan* fp = &md->fmc->flight_plan;
     WeatherFetchCtx* ctx = (WeatherFetchCtx*)calloc(1, sizeof(WeatherFetchCtx));
     if (!ctx) return;
     ctx->md = md;
-    strncpy(ctx->api_key, md->api_key, sizeof(ctx->api_key) - 1);
+    strncpy(ctx->api_key, "", sizeof(ctx->api_key) - 1);  /* use default key */
     ctx->dep_lat = fp->waypoints[0].pos.lat_deg;
     ctx->dep_lon = fp->waypoints[0].pos.lon_deg;
     ctx->arr_lat = fp->waypoints[fp->waypoint_count - 1].pos.lat_deg;
@@ -415,100 +319,435 @@ static void check_weather_fetch(MapDisplay* md)
         SDL_AtomicSet(&md->weather_fetching, 0);
         free(ctx);
     } else {
-        SDL_DetachThread(th);  /* fire-and-forget */
+        SDL_DetachThread(th);
     }
 }
 
 /* =========================================================================
- *  Render functions
+ *  Create / Destroy
  * ========================================================================= */
 
-static void render_tiles(MapDisplay* md)
+MapDisplay* map_display_create(const Config* cfg, FMCState* fmc)
 {
-    SDL_Renderer* r = md->renderer;
-    SDL_Rect* mr = &md->map_rect;
+    (void)cfg;
 
-    SDL_RenderSetClipRect(r, mr);
-    SDL_SetRenderDrawColor(r, 13, 26, 43, 255);
-    SDL_RenderFillRect(r, mr);
+    MapDisplay* md = (MapDisplay*)calloc(1, sizeof(MapDisplay));
+    if (!md) return NULL;
+    md->fmc = fmc;
 
-    double clat = md->disp_lat, clon = md->disp_lon;
-    int zoom = md->zoom;
-    if (clat == 0.0 && clon == 0.0) { SDL_RenderSetClipRect(r, NULL); return; }
+    /* OpenGL attributes */
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+    SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
+    SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
+    SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
+    SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
 
-    double ctx, cty;
-    geo_to_tile(clat, clon, zoom, &ctx, &cty);
-    int cxi = (int)floor(ctx), cyi = (int)floor(cty);
-    int cpx = (int)((ctx - (double)cxi) * (double)GEO_TILE_SIZE);
-    int cpy = (int)((cty - (double)cyi) * (double)GEO_TILE_SIZE);
-    int scx = mr->x + mr->w / 2, scy = mr->y + mr->h / 2;
-    int max_tile = (1 << zoom) - 1;
+    md->window = SDL_CreateWindow("Cabin Moving Map — 3D Globe",
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        CABIN_WIN_W, CABIN_WIN_H,
+        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE |
+        SDL_WINDOW_OPENGL | SDL_WINDOW_ALWAYS_ON_TOP);
+    if (!md->window) {
+        LOG_ERROR("MapDisplay: SDL_CreateWindow (GL) failed: %s", SDL_GetError());
+        free(md); return NULL;
+    }
 
-    for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
-            int tx = cxi + dx, ty = cyi + dy;
-            if (tx < 0 || tx > max_tile || ty < 0 || ty > max_tile) continue;
-            char key[32];
-            make_tile_key(tx, ty, zoom, key, sizeof(key));
-            SDL_Texture* tex = tile_cache_get(md->tile_cache, key);
-            if (!tex) continue;
-            int sx = tx * GEO_TILE_SIZE - (cxi * GEO_TILE_SIZE + cpx) + scx;
-            int sy = ty * GEO_TILE_SIZE - (cyi * GEO_TILE_SIZE + cpy) + scy;
-            SDL_Rect dst = { sx, sy, GEO_TILE_SIZE, GEO_TILE_SIZE };
-            SDL_RenderCopy(r, tex, NULL, &dst);
+    md->gl_ctx = SDL_GL_CreateContext(md->window);
+    if (!md->gl_ctx) {
+        LOG_ERROR("MapDisplay: SDL_GL_CreateContext failed: %s", SDL_GetError());
+        SDL_DestroyWindow(md->window); free(md); return NULL;
+    }
+    SDL_GL_MakeCurrent(md->window, md->gl_ctx);
+    SDL_GL_SetSwapInterval(1);  /* vsync */
+
+    /* OpenGL state */
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_TEXTURE_2D);
+    glClearColor(0.05f, 0.10f, 0.17f, 1.0f);  /* dark blue bg */
+
+    /* Load earth texture */
+    md->earth_tex = load_earth_texture("assets/earth_daymap.jpg");
+    if (!md->earth_tex) {
+        LOG_WARN("MapDisplay: no earth texture — using wireframe fallback");
+    }
+
+    /* Load aircraft sprite */
+    {
+        SDL_Surface* ps = IMG_Load("assets/assets/plane.png");
+        if (ps) {
+            md->plane_w = ps->w;
+            md->plane_h = ps->h;
+            SDL_Surface* rgba = SDL_CreateRGBSurfaceWithFormat(
+                0, ps->w, ps->h, 32, SDL_PIXELFORMAT_RGBA32);
+            if (rgba) {
+                SDL_BlitSurface(ps, NULL, rgba, NULL);
+                glGenTextures(1, &md->plane_tex);
+                glBindTexture(GL_TEXTURE_2D, md->plane_tex);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rgba->w, rgba->h, 0,
+                             GL_RGBA, GL_UNSIGNED_BYTE, rgba->pixels);
+                SDL_FreeSurface(rgba);
+            }
+            SDL_FreeSurface(ps);
+            LOG_INFO("Plane sprite loaded: %dx%d", md->plane_w, md->plane_h);
+        } else {
+            md->plane_tex = 0;
+            LOG_WARN("Plane sprite not found: assets/assets/plane.png");
         }
     }
-    SDL_RenderSetClipRect(r, NULL);
+
+    /* Build sphere mesh */
+    md->sphere_lats = SPHERE_LATS;
+    md->sphere_lons = SPHERE_LONS;
+    md->sphere_list = build_sphere_display_list(SPHERE_LATS, SPHERE_LONS);
+
+    /* Camera defaults */
+    md->camera_dist = CAMERA_DIST_DEFAULT;
+    md->globe_tilt  = GLOBE_TILT_DEFAULT;
+    md->globe_rot_y = 0.0f;
+    md->target_rot_y = 0.0f;
+
+    /* Load fonts for 2D overlay */
+    md->font_small = TTF_OpenFont("resources/fonts/B612-Regular.ttf", 14);
+    md->font_large = TTF_OpenFont("resources/fonts/B612-Regular.ttf", 20);
+    md->font_bold  = TTF_OpenFont("resources/fonts/B612-Bold.ttf", 20);
+
+    /* Window size */
+    SDL_GetWindowSize(md->window, &md->win_w, &md->win_h);
+
+    /* Sync */
+    md->data_mutex = SDL_CreateMutex();
+    md->zoom_start_ms = SDL_GetTicks64();
+
+    LOG_INFO("MapDisplay 3D Globe: created %dx%d GL window", md->win_w, md->win_h);
+    return md;
 }
 
-static void render_header(MapDisplay* md)
+void map_display_destroy(MapDisplay* md)
 {
-    SDL_Renderer* r = md->renderer;
+    if (!md) return;
+    if (md->gl_ctx) {
+        SDL_GL_MakeCurrent(md->window, md->gl_ctx);
+        if (md->earth_tex)    glDeleteTextures(1, &md->earth_tex);
+        if (md->plane_tex)    glDeleteTextures(1, &md->plane_tex);
+        if (md->sphere_list)  glDeleteLists(md->sphere_list, 1);
+    }
+    if (md->font_small) TTF_CloseFont(md->font_small);
+    if (md->font_large) TTF_CloseFont(md->font_large);
+    if (md->font_bold)  TTF_CloseFont(md->font_bold);
+    if (md->data_mutex) SDL_DestroyMutex(md->data_mutex);
+    if (md->gl_ctx)     SDL_GL_DeleteContext(md->gl_ctx);
+    if (md->window)     SDL_DestroyWindow(md->window);
+    free(md);
+    LOG_INFO("MapDisplay 3D Globe: destroyed");
+}
+
+/* =========================================================================
+ *  Update
+ * ========================================================================= */
+
+void map_display_update_position(MapDisplay* md, const FlightDataValues* fd)
+{
+    if (!md || !fd) return;
+    SDL_LockMutex(md->data_mutex);
+    md->last_fd = *fd;
+    SDL_UnlockMutex(md->data_mutex);
+}
+
+/* =========================================================================
+ *  3D rendering: globe + routes
+ * ========================================================================= */
+
+static void render_globe(MapDisplay* md)
+{
+    glPushMatrix();
+
+    /* Orient: rotate globe so aircraft longitude faces camera */
+    glRotatef(md->globe_tilt, 1.0f, 0.0f, 0.0f);  /* tilt from above */
+    glRotatef(md->globe_rot_y, 0.0f, 1.0f, 0.0f);  /* longitude rotation */
+
+    if (md->earth_tex) {
+        /* Textured sphere */
+        glBindTexture(GL_TEXTURE_2D, md->earth_tex);
+        glEnable(GL_TEXTURE_2D);
+        glColor3f(1.0f, 1.0f, 1.0f);
+        glCallList(md->sphere_list);
+        glDisable(GL_TEXTURE_2D);
+    } else {
+        /* Fallback: wireframe sphere */
+        glColor3f(0.2f, 0.4f, 0.6f);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        glCallList(md->sphere_list);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    }
+
+    glPopMatrix();
+}
+
+/**
+ * @brief Draw a small filled circle / disk at a 3D point on the sphere,
+ *        oriented toward the camera via a billboard quad.
+ */
+static void draw_marker(float x, float y, float z,
+                         float r, float g, float b, float size)
+{
+    glPushMatrix();
+    glTranslatef(x, y, z);
+    /* Billboard: point the quad toward camera by undoing rotation.
+     * Simple approach: draw a small GL_POINTS or a tiny sphere-like dot. */
+    glPointSize(size);
+    glColor3f(r, g, b);
+    glBegin(GL_POINTS);
+    glVertex3f(0.0f, 0.0f, 0.0f);
+    glEnd();
+    glPopMatrix();
+}
+
+static void render_routes(MapDisplay* md)
+{
+    glPushMatrix();
+    /* Apply same rotation as globe */
+    glRotatef(md->globe_tilt, 1.0f, 0.0f, 0.0f);
+    glRotatef(md->globe_rot_y, 0.0f, 1.0f, 0.0f);
+
+    const float R = SPHERE_RADIUS + ROUTE_OFFSET;
+
+    /* --- Flown GPS track (solid yellow, thick) --- */
+    if (md->track_count >= 2) {
+        glColor3f(1.0f, 0.85f, 0.0f);
+        glLineWidth(6.0f);
+        glBegin(GL_LINE_STRIP);
+        for (int i = 0; i < md->track_count; i++) {
+            float sx, sy, sz;
+            latlon_to_sphere(md->track[i].lat, md->track[i].lon, &sx, &sy, &sz);
+            glVertex3f(sx * R, sy * R, sz * R);
+        }
+        glEnd();
+    }
+
+    /* --- FMC planned route (dashed yellow) --- */
+    if (md->fmc && md->fmc->flight_plan.waypoint_count >= 2) {
+        const FlightPlan* fp = &md->fmc->flight_plan;
+        int n = fp->waypoint_count;
+
+        /* Yellow dashed route */
+        glColor3f(1.0f, 0.8f, 0.0f);
+        glLineWidth(2.0f);
+        glEnable(GL_LINE_STIPPLE);
+        glLineStipple(1, 0x0F0F);  /* dash pattern */
+        glBegin(GL_LINE_STRIP);
+        for (int i = 0; i < n; i++) {
+            float sx, sy, sz;
+            latlon_to_sphere(fp->waypoints[i].pos.lat_deg,
+                             fp->waypoints[i].pos.lon_deg,
+                             &sx, &sy, &sz);
+            glVertex3f(sx * R, sy * R, sz * R);
+        }
+        glEnd();
+        glDisable(GL_LINE_STIPPLE);
+
+        /* Waypoint markers */
+        float mr = SPHERE_RADIUS + MARKER_OFFSET;
+        for (int i = 0; i < n; i++) {
+            float sx, sy, sz;
+            latlon_to_sphere(fp->waypoints[i].pos.lat_deg,
+                             fp->waypoints[i].pos.lon_deg,
+                             &sx, &sy, &sz);
+            /* Skip start/end — they get special markers */
+            if (i == 0) {
+                draw_marker(sx * mr, sy * mr, sz * mr, 0.15f, 0.68f, 0.38f, 6.0f); /* green */
+            } else if (i == n - 1) {
+                draw_marker(sx * mr, sy * mr, sz * mr, 0.9f, 0.3f, 0.24f, 6.0f);  /* red */
+            } else {
+                draw_marker(sx * mr, sy * mr, sz * mr, 0.4f, 0.55f, 0.7f, 3.0f);  /* blue-gray */
+            }
+        }
+    }
+
+    glPopMatrix();
+}
+
+/**
+ * @brief Store the projected screen position and heading for the aircraft.
+ *        Called during 3D pass; actual sprite drawn in 2D pass.
+ */
+static int   ac_screen_x, ac_screen_y;  /* projected screen position */
+static float ac_heading;                /* aircraft heading for rotation */
+static int   ac_visible;                /* 1 = aircraft is on screen */
+
+static void compute_aircraft_screen_pos(MapDisplay* md)
+{
+    ac_visible = 0;
     FlightDataValues fd;
     SDL_LockMutex(md->data_mutex); fd = md->last_fd; SDL_UnlockMutex(md->data_mutex);
 
-    SDL_Rect hdr = { 0, 0, md->win_w, CABIN_HEADER_H };
-    SDL_SetRenderDrawColor(r, 10, 30, 50, 255);
-    SDL_RenderFillRect(r, &hdr);
-    SDL_SetRenderDrawColor(r, 42, 106, 172, 255);
-    SDL_Rect line = { 0, CABIN_HEADER_H - 2, md->win_w, 2 };
-    SDL_RenderFillRect(r, &line);
+    if (fd.lat_deg == 0.0 && fd.lon_deg == 0.0) return;
 
+    /* Get 3D position on unit sphere from raw lat/lon */
+    float ax, ay, az;
+    latlon_to_sphere(md->disp_lat, md->disp_lon, &ax, &ay, &az);
+    float R = SPHERE_RADIUS + MARKER_OFFSET;
+
+    /* Apply globe rotations on top of the current modelview (which has
+     * camera only — render_globe/render_routes already popped theirs) */
+    glPushMatrix();
+    glRotatef(md->globe_tilt, 1.0f, 0.0f, 0.0f);
+    glRotatef(md->globe_rot_y, 0.0f, 1.0f, 0.0f);
+
+    GLdouble modelview[16], projection[16];
+    GLint viewport[4];
+    glGetDoublev(GL_MODELVIEW_MATRIX, modelview);
+    glGetDoublev(GL_PROJECTION_MATRIX, projection);
+    glGetIntegerv(GL_VIEWPORT, viewport);
+
+    GLdouble sx, sy, sz;
+    gluProject((GLdouble)(ax * R), (GLdouble)(ay * R), (GLdouble)(az * R),
+               modelview, projection, viewport, &sx, &sy, &sz);
+
+    glPopMatrix();
+
+    if (sz > 1.0) return;
+    if (sx < -50 || sx > viewport[2] + 50) return;
+    if (sy < -50 || sy > viewport[3] + 50) return;
+
+    ac_screen_x = (int)sx;
+    ac_screen_y = (int)(md->win_h - sy);
+    ac_heading  = fd.heading_true_deg;
+    ac_visible  = 1;
+}
+
+/** Draw the aircraft sprite during the 2D orthographic pass. */
+static void render_aircraft_sprite(MapDisplay* md)
+{
+    if (!ac_visible || !md->plane_tex) return;
+
+    int cx = ac_screen_x;
+    int cy = ac_screen_y;
+
+    /* Scale: sprite size ~32px */
+    float scale = 1.0f;
+    int dw = (int)((float)md->plane_w * scale);
+    int dh = (int)((float)md->plane_h * scale);
+    if (dw > 64) { dw = 64; dh = (int)((float)dh * (64.0f / (float)md->plane_w)); }
+    if (dh > 64) { dh = 64; dw = (int)((float)dw * (64.0f / (float)md->plane_h)); }
+
+    float hdg_rad = ac_heading * 0.01745329f;
+    float c = cosf(hdg_rad);
+    float s = sinf(hdg_rad);
+    float hw = (float)dw * 0.5f;
+    float hh = (float)dh * 0.5f;
+
+    /* 4 corners of the sprite, rotated around center by heading */
+    float corners[4][2] = {
+        {-hw, -hh}, { hw, -hh}, { hw,  hh}, {-hw,  hh}
+    };
+
+    glBindTexture(GL_TEXTURE_2D, md->plane_tex);
+    glEnable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
+    glBegin(GL_QUADS);
+    for (int i = 0; i < 4; i++) {
+        float rx = corners[i][0] * c - corners[i][1] * s;
+        float ry = corners[i][0] * s + corners[i][1] * c;
+        float u = (i == 0 || i == 3) ? 0.0f : 1.0f;
+        float v = (i < 2) ? 0.0f : 1.0f;
+        glTexCoord2f(u, v);
+        glVertex2f((float)cx + rx, (float)cy + ry);
+    }
+    glEnd();
+
+    glDisable(GL_BLEND);
+    glDisable(GL_TEXTURE_2D);
+}
+
+/* =========================================================================
+ *  2D overlay rendering (orthographic)
+ * ========================================================================= */
+
+static void begin_2d(int win_w, int win_h)
+{
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(0.0, (double)win_w, (double)win_h, 0.0, -1.0, 1.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glDisable(GL_DEPTH_TEST);
+}
+
+static void end_2d(void)
+{
+    glEnable(GL_DEPTH_TEST);
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glPopMatrix();
+}
+
+static void render_header_2d(MapDisplay* md)
+{
+    int w = md->win_w, hh = CABIN_HEADER_H;
+
+    /* Background bar */
+    glColor4f(0.04f, 0.12f, 0.20f, 1.0f);
+    glRecti(0, 0, w, hh);
+
+    /* Bottom accent line */
+    glColor4f(0.16f, 0.42f, 0.67f, 1.0f);
+    glRecti(0, hh - 2, w, hh);
+
+    /* Origin → Dest text */
     char buf[64] = "----  →  ----";
     if (md->fmc && md->fmc->flight_plan.waypoint_count >= 2)
         snprintf(buf, sizeof(buf), "%s  →  %s",
                  md->fmc->flight_plan.departure.icao,
                  md->fmc->flight_plan.arrival.icao);
-    SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
-    font_draw(r, md->win_w / 2, CABIN_HEADER_H / 2, buf, 12, FONT_BOLD);
+
+    SDL_Color white = {255, 255, 255, 255};
+    int tw, th;
+    GLuint tex = text_to_texture(md->font_bold, buf, white, &tw, &th);
+    draw_text_quad(tex, tw, th, w / 2, hh / 2 - th / 2, 0);
+    glDeleteTextures(1, &tex);
 }
 
-static void render_data_bar(MapDisplay* md)
+static void render_databar_2d(MapDisplay* md)
 {
-    SDL_Renderer* r = md->renderer;
-    int bar_y = md->win_h - CABIN_DATABAR_H;
     FlightDataValues fd;
     SDL_LockMutex(md->data_mutex); fd = md->last_fd; SDL_UnlockMutex(md->data_mutex);
 
-    double flown, total, remain, pct;
-    calc_progress(&fd, md->fmc, &flown, &total, &remain, &pct);
+    int w = md->win_w, bar_h = CABIN_DATABAR_H;
+    int bar_y = md->win_h - bar_h;
 
-    SDL_Rect bar = { 0, bar_y, md->win_w, CABIN_DATABAR_H };
-    SDL_SetRenderDrawColor(r, 10, 30, 50, 240);
-    SDL_RenderFillRect(r, &bar);
-    SDL_SetRenderDrawColor(r, 42, 106, 172, 255);
-    SDL_Rect top = { 0, bar_y, md->win_w, 2 };
-    SDL_RenderFillRect(r, &top);
+    /* Background */
+    glColor4f(0.04f, 0.12f, 0.20f, 0.94f);
+    glRecti(0, bar_y, w, md->win_h);
 
-    int col_w = md->win_w / 7;
+    /* Top line */
+    glColor4f(0.16f, 0.42f, 0.67f, 1.0f);
+    glRecti(0, bar_y, w, bar_y + 2);
+
+    /* 7 columns of data */
+    int col_w = w / 7;
     const char* labels[] = {"GS","ALT","HDG","TAS","OAT","DIST","ETA"};
     char vals[7][32];
+
     snprintf(vals[0], 32, "%d KTS", (int)fd.gs_kts);
     snprintf(vals[1], 32, "%d FT",  (int)fd.alt_msl_ft);
     snprintf(vals[2], 32, "%d°",   (int)fd.heading_true_deg);
     snprintf(vals[3], 32, "%d KTS", (int)fd.tas_kts);
     if (fd.oat_c > -99.0f) snprintf(vals[4], 32, "%.1f°C", (double)fd.oat_c);
     else snprintf(vals[4], 32, "--°C");
+
+    double flown, total, remain, pct;
+    calc_progress(&fd, md->fmc, &flown, &total, &remain, &pct);
     if (remain > 1.0) snprintf(vals[5], 32, "%d NM", (int)remain);
     else snprintf(vals[5], 32, "--- NM");
     if (fd.gs_kts > 30.0f && remain > 1.0) {
@@ -516,152 +755,64 @@ static void render_data_bar(MapDisplay* md)
         snprintf(vals[6], 32, "%02d:%02d", (int)h, (int)((h-(int)h)*60.0));
     } else snprintf(vals[6], 32, "--:--");
 
+    SDL_Color c_label = {138, 180, 216, 255};
+    SDL_Color c_value = {255, 255, 255, 255};
+
     for (int i = 0; i < 7; i++) {
         int cx = col_w * i + col_w / 2;
-        SDL_SetRenderDrawColor(r, 138, 180, 216, 255);
-        font_draw(r, cx, bar_y + 10, labels[i], 8, FONT_REGULAR);
-        SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
-        font_draw(r, cx, bar_y + 34, vals[i], 14, FONT_BOLD);
+        int tw, th;
+        GLuint tex;
+
+        tex = text_to_texture(md->font_small, labels[i], c_label, &tw, &th);
+        draw_text_quad(tex, tw, th, cx, bar_y + 8, 0);
+        glDeleteTextures(1, &tex);
+
+        tex = text_to_texture(md->font_large, vals[i], c_value, &tw, &th);
+        draw_text_quad(tex, tw, th, cx, bar_y + 34, 0);
+        glDeleteTextures(1, &tex);
     }
 }
 
-static void render_progress(MapDisplay* md)
+static void render_progress_2d(MapDisplay* md)
 {
-    SDL_Renderer* r = md->renderer;
-    int prog_y = md->win_h - CABIN_DATABAR_H - CABIN_PROGRESS_H;
     FlightDataValues fd;
     SDL_LockMutex(md->data_mutex); fd = md->last_fd; SDL_UnlockMutex(md->data_mutex);
+
+    int w = md->win_w, ph = CABIN_PROGRESS_H;
+    int py = md->win_h - CABIN_DATABAR_H - ph;
 
     double flown, total, remain, pct;
     calc_progress(&fd, md->fmc, &flown, &total, &remain, &pct);
 
-    SDL_Rect track = { 0, prog_y, md->win_w, CABIN_PROGRESS_H };
-    SDL_SetRenderDrawColor(r, 255, 255, 255, 20);
-    SDL_RenderFillRect(r, &track);
+    /* Track background */
+    glColor4f(1.0f, 1.0f, 1.0f, 0.08f);
+    glRecti(0, py, w, py + ph);
 
-    int fw = (int)((double)md->win_w * pct / 100.0);
-    if (fw < 0) fw = 0; if (fw > md->win_w) fw = md->win_w;
-    SDL_Rect fill = { 0, prog_y, fw, CABIN_PROGRESS_H };
-    SDL_SetRenderDrawColor(r, 26, 115, 232, 255);
-    SDL_RenderFillRect(r, &fill);
+    /* Progress fill */
+    int fw = (int)((double)w * pct / 100.0);
+    if (fw < 0) fw = 0;
+    if (fw > w) fw = w;
+    glColor4f(0.10f, 0.45f, 0.91f, 1.0f);
+    glRecti(0, py, fw, py + ph);
 }
 
 /* =========================================================================
- *  Weather / Time overlay (shown during zoomed phase)
- * ========================================================================= */
-
-static void render_weather_overlay(MapDisplay* md)
-{
-    SDL_Renderer* r = md->renderer;
-    SDL_Rect* mr = &md->map_rect;
-    FlightDataValues fd;
-    SDL_LockMutex(md->data_mutex); fd = md->last_fd; SDL_UnlockMutex(md->data_mutex);
-
-    /* Semi-transparent dark overlay on upper portion of map */
-    int overlay_h = mr->h * 2 / 5;
-    if (overlay_h > 300) overlay_h = 300;
-    SDL_Rect shade = { mr->x, mr->y, mr->w, overlay_h };
-    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(r, 0, 0, 0, 160);
-    SDL_RenderFillRect(r, &shade);
-    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
-
-    /* Departure / Arrival info */
-    const char* dep_icao = "----";
-    const char* arr_icao = "----";
-    if (md->fmc && md->fmc->flight_plan.waypoint_count >= 2) {
-        dep_icao = md->fmc->flight_plan.departure.icao;
-        arr_icao = md->fmc->flight_plan.arrival.icao;
-    }
-
-    int col_w = mr->w / 2;
-    int cx_left  = mr->x + col_w / 2;
-    int cx_right = mr->x + col_w + col_w / 2;
-
-    /* --- Departure (left column) --- */
-    SDL_SetRenderDrawColor(r, 138, 180, 216, 255);
-    font_draw(r, cx_left, mr->y + 18, "DEPARTURE", 9, FONT_REGULAR);
-
-    SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
-    font_draw(r, cx_left, mr->y + 42, dep_icao, 20, FONT_BOLD);
-
-    /* Departure weather */
-    char dep_wx[64] = "--";
-    if (md->weather_dep.temp_c > -99.0f && md->weather_dep.weather[0])
-        snprintf(dep_wx, sizeof(dep_wx), "%s  %.0f°C",
-                 md->weather_dep.weather, (double)md->weather_dep.temp_c);
-    SDL_SetRenderDrawColor(r, 200, 210, 220, 255);
-    font_draw(r, cx_left, mr->y + 66, dep_wx, 10, FONT_REGULAR);
-
-    /* Departure time — local system time */
-    char dep_time[16] = "--:--";
-    {
-        time_t now_tt = time(NULL);
-        struct tm* tm_info = localtime(&now_tt);
-        if (tm_info) snprintf(dep_time, sizeof(dep_time), "%02d:%02d LT",
-                              tm_info->tm_hour, tm_info->tm_min);
-    }
-    SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
-    font_draw(r, cx_left, mr->y + 90, dep_time, 16, FONT_BOLD);
-
-    /* --- Arrival (right column) --- */
-    SDL_SetRenderDrawColor(r, 138, 180, 216, 255);
-    font_draw(r, cx_right, mr->y + 18, "ARRIVAL", 9, FONT_REGULAR);
-
-    SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
-    font_draw(r, cx_right, mr->y + 42, arr_icao, 20, FONT_BOLD);
-
-    /* Arrival weather */
-    char arr_wx[64] = "--";
-    if (md->weather_arr.temp_c > -99.0f && md->weather_arr.weather[0])
-        snprintf(arr_wx, sizeof(arr_wx), "%s  %.0f°C",
-                 md->weather_arr.weather, (double)md->weather_arr.temp_c);
-    SDL_SetRenderDrawColor(r, 200, 210, 220, 255);
-    font_draw(r, cx_right, mr->y + 66, arr_wx, 10, FONT_REGULAR);
-
-    /* Arrival time — ETA from flight plan or computed */
-    char arr_time[16] = "--:--";
-    if (fd.gs_kts > 30.0f) {
-        double remain_nm = 0.0;
-        if (md->fmc && md->fmc->flight_plan.waypoint_count >= 2) {
-            const FlightPlan* fp = &md->fmc->flight_plan;
-            remain_nm = geo_haversine_nm(fd.lat_deg, fd.lon_deg,
-                fp->waypoints[fp->waypoint_count-1].pos.lat_deg,
-                fp->waypoints[fp->waypoint_count-1].pos.lon_deg);
-        }
-        if (remain_nm > 1.0) {
-            double hrs = remain_nm / (double)fd.gs_kts;
-            int h = (int)hrs, m = (int)((hrs - (double)h) * 60.0);
-            snprintf(arr_time, sizeof(arr_time), "+%02d:%02d", h, m);
-        }
-    }
-    SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
-    font_draw(r, cx_right, mr->y + 90, arr_time, 16, FONT_BOLD);
-
-    /* Divider line */
-    SDL_SetRenderDrawColor(r, 42, 106, 172, 100);
-    SDL_Rect div = { mr->x + col_w, mr->y + 8, 1, overlay_h - 16 };
-    SDL_RenderFillRect(r, &div);
-}
-
-/* =========================================================================
- *  Public render entry
+ *  Main render entry
  * ========================================================================= */
 
 void map_display_render(MapDisplay* md)
 {
-    if (!md || !md->renderer) return;
+    if (!md || !md->gl_ctx) return;
 
-    /* Update window size each frame (avoids event-polling conflicts with main loop) */
+    SDL_GL_MakeCurrent(md->window, md->gl_ctx);
+
+    /* Update window size */
     SDL_GetWindowSize(md->window, &md->win_w, &md->win_h);
-    md->map_rect.w = md->win_w;
-    md->map_rect.h = md->win_h - CABIN_HEADER_H - CABIN_DATABAR_H - CABIN_PROGRESS_H;
-    if (md->map_rect.h < 40) md->map_rect.h = 40;
 
-    drain_pending(md);
-    interpolate(md);
+    /* Interpolate position */
+    interpolate_position(md);
 
-    /* Record GPS track breadcrumb (every ~2 seconds, or when moved >0.5 NM) */
+    /* Record GPS track breadcrumbs */
     {
         FlightDataValues fd;
         SDL_LockMutex(md->data_mutex); fd = md->last_fd; SDL_UnlockMutex(md->data_mutex);
@@ -685,12 +836,16 @@ void map_display_render(MapDisplay* md)
         }
     }
 
-    update_auto_zoom(md);
+    /* Rotate globe so aircraft stays exactly at screen center.
+     * RotY(-lon) centers longitude at +Z.
+     * Tilt(+lat) centers latitude so aircraft → (0,0,R) on the view ray. */
+    md->globe_rot_y = -(float)md->disp_lon;
+    md->globe_tilt  =  (float)md->disp_lat;
 
-    /* Check weather fetch (throttled to 10 min) */
+    /* Check weather fetch */
     check_weather_fetch(md);
 
-    /* Route change detection → reset base zoom + force weather refresh */
+    /* Route change detection */
     if (md->fmc && md->fmc->flight_plan.waypoint_count >= 2) {
         const FlightPlan* fp = &md->fmc->flight_plan;
         if (fp->waypoint_count != md->last_wpt_count ||
@@ -699,56 +854,45 @@ void map_display_render(MapDisplay* md)
             md->last_wpt_count = fp->waypoint_count;
             strncpy(md->last_dep_icao, fp->departure.icao, 7);
             strncpy(md->last_arr_icao, fp->arrival.icao, 7);
-            /* Keep base_zoom unchanged — don't capture inflated zoom from cycle */
-            md->zoom_start_ms = SDL_GetTicks64();
-            md->last_weather_fetch_ms = 0;  /* force weather re-fetch on route change */
+            md->last_weather_fetch_ms = 0;
         }
     }
 
-    trigger_fetch(md);
+    /* =====================================================================
+     *  RENDER 3D
+     * ===================================================================== */
 
-    /* Render to cabin window */
-    SDL_SetRenderDrawColor(md->renderer, 13, 26, 43, 255);
-    SDL_RenderClear(md->renderer);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glViewport(0, 0, md->win_w, md->win_h);
 
-    render_tiles(md);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    double aspect = (double)md->win_w / (double)md->win_h;
+    gluPerspective(45.0, aspect, 0.1, 20.0);
 
-    /* Trajectory overlay — use interpolated position for aircraft */
-    FlightDataValues fd;
-    SDL_LockMutex(md->data_mutex); fd = md->last_fd; SDL_UnlockMutex(md->data_mutex);
-    fd.lat_deg = md->disp_lat;
-    fd.lon_deg = md->disp_lon;
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
 
-    /* Build track lat/lon arrays for trajectory_render */
-    double* track_lats = NULL;
-    double* track_lons = NULL;
-    if (md->track_count >= 2) {
-        track_lats = (double*)malloc((size_t)md->track_count * 2 * sizeof(double));
-        track_lons = track_lats + md->track_count;
-        if (track_lats) {
-            for (int i = 0; i < md->track_count; i++) {
-                track_lats[i] = md->track[i].lat;
-                track_lons[i] = md->track[i].lon;
-            }
-        }
-    }
+    /* Camera at eye-level (Y=0) so the view ray passes exactly through
+     * (0,0,R) where the aircraft is centered by globe rotations. */
+    gluLookAt(0.0, 0.0, (double)md->camera_dist,   /* camera */
+              0.0, 0.0, 0.0,                       /* target */
+              0.0, 1.0, 0.0);                       /* up */
 
-    trajectory_render(md->renderer, md->disp_lat, md->disp_lon, md->zoom,
-                      md->map_rect.w, md->map_rect.h,
-                      md->map_rect.x, md->map_rect.y,
-                      &fd, md->fmc,
-                      track_lats, track_lons, md->track_count);
+    render_globe(md);
+    render_routes(md);
+    compute_aircraft_screen_pos(md);
 
-    free(track_lats);
+    /* =====================================================================
+     *  RENDER 2D
+     * ===================================================================== */
 
-    /* Weather overlay — only during 20–30s of cycle */
-    if (is_overlay_phase(md)) {
-        render_weather_overlay(md);
-    }
+    begin_2d(md->win_w, md->win_h);
+    render_aircraft_sprite(md);
+    render_header_2d(md);
+    render_progress_2d(md);
+    render_databar_2d(md);
+    end_2d();
 
-    render_header(md);
-    render_progress(md);
-    render_data_bar(md);
-
-    SDL_RenderPresent(md->renderer);
+    SDL_GL_SwapWindow(md->window);
 }

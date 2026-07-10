@@ -1,10 +1,13 @@
 /**
  * @file    map_display.h
- * @brief   Native SDL2 cabin trajectory display — separate window.
+ * @brief   Cabin 3D globe display — separate OpenGL window.
  *
- * Creates an independent SDL window for the cabin moving map.
- * Fetches 高德 map tiles via HTTP in a background thread.
- * Renders map, trajectory overlay, and data bar in the cabin window.
+ * Creates an independent SDL window with OpenGL context for a 3D globe
+ * cabin moving map. Loads an equirectangular earth texture, renders it
+ * on a UV sphere, and draws flight route/track overlays in 3D.
+ *
+ * 2D elements (header, data bar, progress bar) are rendered via
+ * orthographic projection on top.
  *
  * Config: reads [map] section from default.cfg.
  */
@@ -14,9 +17,13 @@
 
 #include "data/flight_data.h"
 #include "data/navdata.h"
-#include "tile_cache.h"
 
 #include <SDL2/SDL.h>
+
+/* Need OpenGL headers — SDL_opengl.h for GL, plus GLU */
+#include <SDL2/SDL_opengl.h>
+#include <GL/glu.h>
+#include <SDL2/SDL_ttf.h>
 
 typedef struct Config Config;
 
@@ -31,32 +38,29 @@ typedef struct {
 } WeatherInfo;
 
 typedef struct MapDisplay {
-    /* --- Config --- */
-    char     api_key[64];
-    int      zoom;
-    int      tile_size;
-    int      fetch_interval_ms;
-
     /* --- SDL window --- */
-    SDL_Window*   window;
-    SDL_Renderer* renderer;
-    int           win_w, win_h;
-    SDL_Rect      map_rect;
+    SDL_Window*    window;
+    SDL_GLContext  gl_ctx;
+    int            win_w, win_h;
 
-    /* --- Tile cache & fetch --- */
-    TileCache*    tile_cache;
-    SDL_Thread*   fetch_thread;
-    SDL_atomic_t  fetch_running;
-    SDL_atomic_t  fetch_pending;
-    double        fetch_lat, fetch_lon;
-    int           fetch_zoom;
-    SDL_mutex*    fetch_mutex;
+    /* --- OpenGL objects --- */
+    GLuint         earth_tex;       /* equirectangular earth texture */
+    GLuint         plane_tex;       /* aircraft icon sprite */
+    int            plane_w, plane_h;/* sprite dimensions */
+    GLuint         sphere_list;     /* display list for UV sphere mesh */
+    int            sphere_lats;     /* mesh resolution */
+    int            sphere_lons;
 
-    /* --- Pending surfaces --- */
-    #define CABIN_PENDING_MAX  9
-    struct { SDL_Surface* surf; char key[32]; } pending[CABIN_PENDING_MAX];
-    int           pending_count;
-    SDL_mutex*    pending_mutex;
+    /* --- Camera --- */
+    float          camera_dist;     /* distance from globe center */
+    float          globe_tilt;      /* tilt angle (degrees, ~25°) */
+    float          globe_rot_y;     /* current Y rotation (degrees) */
+    float          target_rot_y;    /* target Y rotation (interpolated) */
+
+    /* --- Font for 2D overlay --- */
+    TTF_Font*      font_small;
+    TTF_Font*      font_large;
+    TTF_Font*      font_bold;
 
     /* --- Flight data --- */
     SDL_mutex*       data_mutex;
@@ -74,20 +78,19 @@ typedef struct MapDisplay {
     /* --- FMC --- */
     FMCState*     fmc;
 
-    /* --- Auto-zoom --- */
-    double        base_zoom;
+    /* --- Auto-zoom (now orbit animation) --- */
     uint64_t      zoom_start_ms;
 
-    /* --- Route change --- */
+    /* --- Route change detection --- */
     int           last_wpt_count;
     char          last_dep_icao[8];
     char          last_arr_icao[8];
 
     /* --- Weather --- */
-    WeatherInfo   weather_dep;     /* Departure airport weather */
-    WeatherInfo   weather_arr;     /* Arrival airport weather */
+    WeatherInfo   weather_dep;
+    WeatherInfo   weather_arr;
     uint64_t      last_weather_fetch_ms;
-    SDL_atomic_t  weather_fetching;  /* 1 = thread is running */
+    SDL_atomic_t  weather_fetching;
 } MapDisplay;
 
 MapDisplay* map_display_create(const Config* cfg, FMCState* fmc);

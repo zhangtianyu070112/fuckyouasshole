@@ -24,7 +24,7 @@ DBG_FLAGS    := -g -O0 -DDEBUG
 MOD_NAMES    := config event main thread app ai
 MOD_INC      := $(foreach mod,$(MOD_NAMES),-Ibuild/$(mod))
 INC_FLAGS    := -Isrc -Isrc/ai -Iinstruments $(MOD_INC) $(SDL_CFLAGS)
-LDFLAGS      := -lws2_32 -lm $(SDL_LIBS)
+LDFLAGS      := -lws2_32 -lm -lopengl32 -lglu32 $(SDL_LIBS)
 
 # If SDL2_gfx is available, include it
 SDL_GFX_CFLAGS := $(shell pkg-config --cflags SDL2_gfx 2>/dev/null)
