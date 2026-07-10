@@ -22,6 +22,7 @@
 #include "data/navdata.h"
 #include "data/route_graph.h"
 #include "ds/avl_tree.h"
+#include "ds/hash_table.h"
 #include "ds/linked_list.h"
 #include "utils/math_util.h"
 #include "utils/font_manager.h"
@@ -103,6 +104,9 @@ typedef struct {
 
     /* AVL tree for sorted waypoint display */
     AVLTree* wpt_tree;
+
+    /* O(1) waypoint ident lookup (hash table: ident → Waypoint*) */
+    HashTable* wpt_lookup;
 
     /* Message history (linked list of FmcMessage) */
     LinkedList* message_history;
@@ -219,6 +223,23 @@ static int is_hoverable_button(const char* label)
     if (!label) return 0;
     /* All buttons get hover/click — number keys get circular, others rectangular */
     return 1;
+}
+
+/* =========================================================================
+ *  Waypoint ident lookup (hash table)
+ * ========================================================================= */
+
+/**
+ * @brief O(1) lookup of a waypoint by its ident string.
+ *        Searches the hash table built from nav_waypoints + nav_airports.
+ * @param d     FMC private data.
+ * @param ident Uppercase ident to search for (e.g. "VYK", "LADIX").
+ * @return Pointer to the Waypoint, or NULL if not found.
+ */
+static Waypoint* find_waypoint_by_ident(FMCData* d, const char* ident)
+{
+    if (!d->wpt_lookup || !ident || !ident[0]) return NULL;
+    return (Waypoint*)ht_get(d->wpt_lookup, ident);
 }
 
 /* =========================================================================
@@ -393,9 +414,9 @@ static void build_legs_page(FMCData* d)
         snprintf(d->display[2], 25, "                       ");
         snprintf(d->display[3], 25, "  -- NO ROUTE --       ");
         snprintf(d->display[4], 25, "                       ");
-        snprintf(d->display[5], 25, "  USE RTE PAGE TO      ");
+        snprintf(d->display[5], 25, "  TYPE WPT IDENT +     ");
         snprintf(d->display[6], 25, "                       ");
-        snprintf(d->display[7], 25, "  ENTER ROUTE          ");
+        snprintf(d->display[7], 25, "  LSK TO INSERT        ");
     } else if (d->legs_sort_mode) {
         /* Alphabetical order via AVL tree */
         rebuild_wpt_tree(d);
@@ -450,9 +471,9 @@ static void build_legs_page(FMCData* d)
     }
 
     /* Navigation hints */
-    snprintf(d->display[10], 25, "                       ");
+    snprintf(d->display[10], 25, " L:INS B4  R:INS AF/DEL");
     if (count > 5) {
-        snprintf(d->display[11], 25, " <PG UP  PG DN  SORT> ");
+        snprintf(d->display[11], 25, " <LEGS   PG DN   SORT> ");
     } else {
         snprintf(d->display[11], 25, " <LEGS          SORT> ");
     }
@@ -964,16 +985,104 @@ static void handle_lsk(FMCData* d, int side, int line)
         }
         break;
 
-    case 2: /* LEGS */
-        if (side == 0 && line == 5) {
-            d->current_page = 1; /* back to RTE */
-        }
-        if (side == 1 && line == 5) {
-            /* PAGE DOWN */
-            if (fp && fp->waypoint_count > 10) {
-                d->legs_scroll += 10;
-                if (d->legs_scroll >= fp->waypoint_count) {
-                    d->legs_scroll = 0; /* wrap around */
+    case 2: /* LEGS — L1-L5/R1-R5 = waypoint edit, L6/R6 = navigation */
+        {
+            int row = line; /* 0..4 for data rows, 5 for bottom nav row */
+            int is_data_row = (row >= 0 && row <= 4);
+            int wpt_idx = d->legs_scroll + row; /* actual index in flight plan */
+
+            if (side == 0) {
+                /* === LEFT LSK === */
+                if (line == 5) {
+                    d->current_page = 1; /* L6: back to RTE */
+                } else if (is_data_row && fp) {
+                    if (d->scratchpad[0]) {
+                        /* INSERT BEFORE this row's waypoint */
+                        char ident[32];
+                        strncpy(ident, d->scratchpad, sizeof(ident) - 1);
+                        ident[sizeof(ident) - 1] = '\0';
+                        for (char* p = ident; *p; p++)
+                            *p = (char)toupper((unsigned char)*p);
+
+                        Waypoint* found = find_waypoint_by_ident(d, ident);
+                        if (!found) {
+                            set_message(d, "NOT IN DATABASE");
+                        } else if (fp->waypoint_count >= MAX_ROUTE_WAYPOINTS) {
+                            set_message(d, "ROUTE FULL");
+                        } else {
+                            int insert_at = wpt_idx;
+                            if (insert_at > fp->waypoint_count)
+                                insert_at = fp->waypoint_count;
+                            flight_plan_add_waypoint(fp, *found, insert_at - 1);
+                            d->legs_sort_mode = 0;
+                            d->fmc->plan_modified = 1;
+                            char buf[64];
+                            snprintf(buf, sizeof(buf), "%s INSERTED", found->ident);
+                            set_message(d, buf);
+                        }
+                        memset(d->scratchpad, 0, sizeof(d->scratchpad));
+                    } else {
+                        /* COPY waypoint ident to scratchpad */
+                        if (fp && wpt_idx >= 0 && wpt_idx < fp->waypoint_count) {
+                            strncpy(d->scratchpad, fp->waypoints[wpt_idx].ident,
+                                    sizeof(d->scratchpad) - 1);
+                        }
+                    }
+                }
+            } else {
+                /* === RIGHT LSK === */
+                if (line == 5) {
+                    /* R6: PAGE DOWN */
+                    if (fp && fp->waypoint_count > 10) {
+                        d->legs_scroll += 10;
+                        if (d->legs_scroll >= fp->waypoint_count)
+                            d->legs_scroll = 0;
+                    }
+                } else if (is_data_row && fp) {
+                    if (d->scratchpad[0]) {
+                        /* INSERT AFTER this row's waypoint */
+                        char ident[32];
+                        strncpy(ident, d->scratchpad, sizeof(ident) - 1);
+                        ident[sizeof(ident) - 1] = '\0';
+                        for (char* p = ident; *p; p++)
+                            *p = (char)toupper((unsigned char)*p);
+
+                        Waypoint* found = find_waypoint_by_ident(d, ident);
+                        if (!found) {
+                            set_message(d, "NOT IN DATABASE");
+                        } else if (fp->waypoint_count >= MAX_ROUTE_WAYPOINTS) {
+                            set_message(d, "ROUTE FULL");
+                        } else {
+                            int insert_at = wpt_idx;
+                            if (insert_at >= fp->waypoint_count)
+                                insert_at = fp->waypoint_count - 1;
+                            flight_plan_add_waypoint(fp, *found, insert_at);
+                            d->legs_sort_mode = 0;
+                            d->fmc->plan_modified = 1;
+                            char buf[64];
+                            snprintf(buf, sizeof(buf), "%s INSERTED", found->ident);
+                            set_message(d, buf);
+                        }
+                        memset(d->scratchpad, 0, sizeof(d->scratchpad));
+                    } else {
+                        /* DELETE this row's waypoint */
+                        if (fp && wpt_idx >= 0 && wpt_idx < fp->waypoint_count) {
+                            char ident[16];
+                            strncpy(ident, fp->waypoints[wpt_idx].ident, sizeof(ident) - 1);
+                            ident[sizeof(ident) - 1] = '\0';
+                            flight_plan_remove_waypoint(fp, wpt_idx);
+                            d->legs_sort_mode = 0;
+                            d->fmc->plan_modified = 1;
+                            /* Adjust scroll if last page now empty */
+                            if (d->legs_scroll >= fp->waypoint_count && d->legs_scroll > 0)
+                                d->legs_scroll -= 10;
+                            if (d->legs_scroll < 0) d->legs_scroll = 0;
+                            char buf[64];
+                            snprintf(buf, sizeof(buf), "%s DELETED", ident);
+                            set_message(d, buf);
+                        }
+                        memset(d->scratchpad, 0, sizeof(d->scratchpad));
+                    }
                 }
             }
         }
@@ -1256,7 +1365,11 @@ static int cdu_button_action(FMCData* d, const char* label)
     }
     if (strcmp(label, "DEL") == 0) {
         int slen = (int)strlen(d->scratchpad);
-        if (slen > 0) d->scratchpad[slen - 1] = '\0';
+        if (slen > 0) {
+            d->scratchpad[slen - 1] = '\0';
+        } else if (d->current_page == 2) {
+            set_message(d, "PRESS RSK TO DEL WPT");
+        }
         return 1;
     }
     if (strcmp(label, "SPACE") == 0 || strcmp(label, "SP") == 0) {
@@ -1710,6 +1823,16 @@ static void fmc_on_init(Instrument* self, App* app)
     /* Create AVL tree for sorted waypoint display */
     d->wpt_tree = avl_create(wpt_compare_ident, NULL);
 
+    /* Build waypoint ident lookup hash table (O(1) ident → Waypoint*) */
+    d->wpt_lookup = ht_create(500009); /* prime, ~235k entries → ~0.47 load */
+    if (d->wpt_lookup && d->fmc) {
+        for (int i = 0; i < d->fmc->nav_wpt_count; i++) {
+            ht_put(d->wpt_lookup, d->fmc->nav_waypoints[i].ident,
+                   &d->fmc->nav_waypoints[i]);
+        }
+        LOG_INFO("FMC wpt_lookup: %d entries built", ht_size(d->wpt_lookup));
+    }
+
     /* Load background image and parse layout */
     SDL_Surface* surf = IMG_Load("assets/assets/fmc.png");
     if (surf) {
@@ -1721,9 +1844,10 @@ static void fmc_on_init(Instrument* self, App* app)
     parse_json_layout(d);
 
     build_page(d);
-    LOG_INFO("FMC initialized (graph: %s, avl: %s, msgs: %s)",
+    LOG_INFO("FMC initialized (graph: %s, avl: %s, lookup: %s, msgs: %s)",
              d->graph ? "OK" : "NONE",
              d->wpt_tree ? "OK" : "FAIL",
+             d->wpt_lookup ? "OK" : "FAIL",
              d->message_history ? "LL" : "FAIL");
 }
 
@@ -2014,7 +2138,12 @@ static int fmc_on_event(Instrument* self, const SDL_Event* ev)
         int slen = (int)strlen(d->scratchpad);
 
         if (key == SDLK_BACKSPACE || key == SDLK_DELETE) {
-            if (slen > 0) d->scratchpad[slen - 1] = '\0';
+            if (slen > 0) {
+                d->scratchpad[slen - 1] = '\0';
+            } else if (d->current_page == 2) {
+                /* LEGS page: hint user to use right LSK to delete a waypoint */
+                set_message(d, "PRESS RSK TO DEL WPT");
+            }
             /* Forward DEL to X-Plane FMC */
             xp_forward_cdu_key(d, "DEL");
             return 1;
@@ -2050,6 +2179,10 @@ static void fmc_on_destroy(Instrument* self)
             avl_destroy(d->wpt_tree, 0);  /* don't free waypoints */
             d->wpt_tree = NULL;
         }
+        if (d->wpt_lookup) {
+            ht_destroy(d->wpt_lookup, 0);  /* values are Waypoint* owned by FMCState */
+            d->wpt_lookup = NULL;
+        }
         if (d->message_history) {
             ll_destroy(d->message_history, 1);  /* free FmcMessage nodes */
             d->message_history = NULL;
@@ -2079,6 +2212,7 @@ Instrument* fmc_create(void)
     data->legs_scroll     = 0;
     data->message_scroll  = 0;
     data->graph           = NULL;
+    data->wpt_lookup      = NULL;
     data->fmc             = NULL;
     data->message_history = NULL;
     data->smooth_gs       = 0.0f;
