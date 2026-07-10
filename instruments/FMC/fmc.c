@@ -133,6 +133,11 @@ typedef struct {
         float x1, y1, x2, y2;
     } buttons[100];
     int button_count;
+
+    /* Mouse hover / click tracking for rectangular function buttons */
+    int     hovered_button;    /* index into buttons[], or -1 */
+    int     clicked_button;    /* index into buttons[], or -1 */
+    Uint32  click_time;        /* SDL_GetTicks() when last click happened */
 } FMCData;
 
 /* =========================================================================
@@ -153,6 +158,67 @@ static void rte_activate(FMCData* d);
 static void set_col(SDL_Renderer* r, uint8_t R, uint8_t G, uint8_t B, uint8_t A)
 {
     SDL_SetRenderDrawColor(r, R, G, B, A);
+}
+
+/**
+ * @brief Draw a 2px-thick circle outline using the midpoint circle algorithm.
+ *        Draws two concentric circles at radius and radius-1 for thickness.
+ */
+static void draw_circle_border(SDL_Renderer* r, int cx, int cy, int radius)
+{
+    for (int pass = 0; pass < 2; pass++) {
+        int r2 = radius - pass;
+        if (r2 <= 0) continue;
+        int x = 0, y = r2;
+        int d = 3 - 2 * r2;
+        while (y >= x) {
+            SDL_RenderDrawPoint(r, cx + x, cy + y);
+            SDL_RenderDrawPoint(r, cx + y, cy + x);
+            SDL_RenderDrawPoint(r, cx - x, cy + y);
+            SDL_RenderDrawPoint(r, cx - y, cy + x);
+            SDL_RenderDrawPoint(r, cx + x, cy - y);
+            SDL_RenderDrawPoint(r, cx + y, cy - x);
+            SDL_RenderDrawPoint(r, cx - x, cy - y);
+            SDL_RenderDrawPoint(r, cx - y, cy - x);
+            x++;
+            if (d < 0) {
+                d = d + 4 * x + 6;
+            } else {
+                d = d + 4 * (x - y) + 10;
+                y--;
+            }
+        }
+    }
+}
+
+/* =========================================================================
+ *  Button classification: which buttons get hover/click border effects
+ * ========================================================================= */
+
+/**
+ * @brief Return 1 if the button is a number keypad key.
+ *        These get circular hover/click effects instead of rectangular.
+ */
+static int is_number_key_button(const char* label)
+{
+    if (!label) return 0;
+    if (strncmp(label, "NUM_", 4) == 0) return 1;
+    if (strcmp(label, "DOT")        == 0) return 1;
+    if (strcmp(label, "PLUS_MINUS") == 0) return 1;
+    return 0;
+}
+
+/**
+ * @brief Return 1 if the button should get hover/click border effects.
+ *
+ *   Rectangular:  function keys, LSK keys, letter keys, edit keys
+ *   Circular:     number keypad keys (NUM_*, DOT, PLUS_MINUS)
+ */
+static int is_hoverable_button(const char* label)
+{
+    if (!label) return 0;
+    /* All buttons get hover/click — number keys get circular, others rectangular */
+    return 1;
 }
 
 /* =========================================================================
@@ -1610,6 +1676,9 @@ static void fmc_on_init(Instrument* self, App* app)
     d->current_page   = 0;
     d->legs_scroll    = 0;
     d->message_scroll = 0;
+    d->hovered_button = -1;
+    d->clicked_button = -1;
+    d->click_time     = 0;
     memset(d->scratchpad, 0, sizeof(d->scratchpad));
     memset(d->origin_input, 0, sizeof(d->origin_input));
     memset(d->dest_input,   0, sizeof(d->dest_input));
@@ -1762,11 +1831,78 @@ static void fmc_on_render(Instrument* self, SDL_Renderer* renderer)
             }
         }
     }
+
+    /* === Draw hover / click borders for all keyboard buttons === */
+    {
+        Uint32 now = SDL_GetTicks();
+        int click_active = (d->clicked_button >= 0 &&
+                            (now - d->click_time) < 200);  /* 200ms flash */
+
+        for (int i = 0; i < d->button_count; i++) {
+            if (!is_hoverable_button(d->buttons[i].label)) continue;
+
+            int is_circle = is_number_key_button(d->buttons[i].label);
+            int bx = (int)(d->buttons[i].x1 * rect->w);
+            int by = (int)(d->buttons[i].y1 * rect->h);
+            int bw = (int)((d->buttons[i].x2 - d->buttons[i].x1) * rect->w);
+            int bh = (int)((d->buttons[i].y2 - d->buttons[i].y1) * rect->h);
+
+            if (click_active && i == d->clicked_button) {
+                /* Clicked: gray */
+                set_col(renderer, COL_GRAY);
+            } else if (i == d->hovered_button && !click_active) {
+                /* Hovered: white */
+                set_col(renderer, COL_WHITE);
+            } else {
+                continue;
+            }
+
+            if (is_circle) {
+                /* Number keys: circular border, radius 31.2px */
+                int cx = bx + bw / 2;
+                int cy = by + bh / 2;
+                draw_circle_border(renderer, cx, cy, 31);
+            } else {
+                /* Rectangular buttons: 2px rectangle border */
+                SDL_Rect btn = { bx, by, bw, bh };
+                SDL_RenderDrawRect(renderer, &btn);
+                SDL_Rect inner = { bx + 1, by + 1, bw - 2, bh - 2 };
+                SDL_RenderDrawRect(renderer, &inner);
+            }
+        }
+
+        /* Expire click state after the flash duration */
+        if (d->clicked_button >= 0 && (now - d->click_time) >= 200) {
+            d->clicked_button = -1;
+        }
+    }
 }
 
 static int fmc_on_event(Instrument* self, const SDL_Event* ev)
 {
     FMCData* d = (FMCData*)self->private_data;
+
+    /* --- Mouse motion: track which button is being hovered --- */
+    if (ev->type == SDL_MOUSEMOTION) {
+        int mx = ev->motion.x - self->rect.x;
+        int my = ev->motion.y - self->rect.y;
+
+        d->hovered_button = -1;
+        for (int i = 0; i < d->button_count; i++) {
+            int bx = (int)(d->buttons[i].x1 * self->rect.w);
+            int by = (int)(d->buttons[i].y1 * self->rect.h);
+            int bw = (int)((d->buttons[i].x2 - d->buttons[i].x1) * self->rect.w);
+            int bh = (int)((d->buttons[i].y2 - d->buttons[i].y1) * self->rect.h);
+
+            if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
+                if (is_hoverable_button(d->buttons[i].label)) {
+                    d->hovered_button = i;
+                }
+                break;
+            }
+        }
+        return 0;  /* don't consume motion events */
+    }
 
     /* --- Mouse: LSK & CDU button clicks --- */
     if (ev->type == SDL_MOUSEBUTTONDOWN) {
@@ -1783,6 +1919,13 @@ static int fmc_on_event(Instrument* self, const SDL_Event* ev)
 
                 if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
                     const char* label = d->buttons[i].label;
+
+                    /* Track click for rectangular button border flash */
+                    if (is_hoverable_button(label)) {
+                        d->clicked_button = i;
+                        d->click_time     = SDL_GetTicks();
+                    }
+
                     if (strncmp(label, "LSK_", 4) == 0) {
                         int num = label[4] - '1';
                         if (label[5] == 'L') handle_lsk(d, 0, num);
