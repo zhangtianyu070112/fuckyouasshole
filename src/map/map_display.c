@@ -306,7 +306,7 @@ static void check_weather_fetch(MapDisplay* md)
     WeatherFetchCtx* ctx = (WeatherFetchCtx*)calloc(1, sizeof(WeatherFetchCtx));
     if (!ctx) return;
     ctx->md = md;
-    strncpy(ctx->api_key, "", sizeof(ctx->api_key) - 1);  /* use default key */
+    strncpy(ctx->api_key, md->api_key, sizeof(ctx->api_key) - 1);
     ctx->dep_lat = fp->waypoints[0].pos.lat_deg;
     ctx->dep_lon = fp->waypoints[0].pos.lon_deg;
     ctx->arr_lat = fp->waypoints[fp->waypoint_count - 1].pos.lat_deg;
@@ -329,11 +329,15 @@ static void check_weather_fetch(MapDisplay* md)
 
 MapDisplay* map_display_create(const Config* cfg, FMCState* fmc)
 {
-    (void)cfg;
-
     MapDisplay* md = (MapDisplay*)calloc(1, sizeof(MapDisplay));
     if (!md) return NULL;
     md->fmc = fmc;
+
+    /* Read API key for weather */
+    if (cfg) {
+        const char* key = config_get_str(cfg, "map", "amap_api_key", "");
+        strncpy(md->api_key, key, sizeof(md->api_key) - 1);
+    }
 
     /* OpenGL attributes */
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
@@ -797,6 +801,137 @@ static void render_progress_2d(MapDisplay* md)
 }
 
 /* =========================================================================
+ *  Weather overlay (10s show / 10s hide cycle)
+ * ========================================================================= */
+
+#define WEATHER_CYCLE_MS  20000   /* full cycle: 10s show + 10s hide */
+#define WEATHER_SHOW_MS   10000   /* visible duration */
+
+/** Return 1 if the weather overlay should be visible now. */
+static int weather_overlay_visible(void)
+{
+    uint64_t now = SDL_GetTicks64();
+    return ((now % (uint64_t)WEATHER_CYCLE_MS) < (uint64_t)WEATHER_SHOW_MS) ? 1 : 0;
+}
+
+static void render_weather_overlay_2d(MapDisplay* md)
+{
+    if (!weather_overlay_visible()) return;
+
+    FlightDataValues fd;
+    SDL_LockMutex(md->data_mutex); fd = md->last_fd; SDL_UnlockMutex(md->data_mutex);
+
+    int w = md->win_w, h = md->win_h;
+    int map_top = CABIN_HEADER_H;
+    int map_h   = h - CABIN_HEADER_H - CABIN_DATABAR_H - CABIN_PROGRESS_H;
+
+    /* Semi-transparent gray overlay on upper ~40% of map area */
+    int overlay_h = map_h * 2 / 5;
+    if (overlay_h > 280) overlay_h = 280;
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(0.08f, 0.08f, 0.10f, 0.75f);  /* dark semi-transparent */
+    glRecti(0, map_top, w, map_top + overlay_h);
+    glDisable(GL_BLEND);
+
+    /* Get airport ICAOs */
+    const char* dep_icao = "----";
+    const char* arr_icao = "----";
+    if (md->fmc && md->fmc->flight_plan.waypoint_count >= 2) {
+        dep_icao = md->fmc->flight_plan.departure.icao;
+        arr_icao = md->fmc->flight_plan.arrival.icao;
+    }
+
+    int col_w = w / 2;
+    int cx_left  = col_w / 2;
+    int cx_right = col_w + col_w / 2;
+    int y = map_top + 20;
+
+    /* --- Departure (left column) --- */
+    {
+        SDL_Color c_label = {138, 180, 216, 255};
+        SDL_Color c_white = {255, 255, 255, 255};
+        SDL_Color c_gray  = {180, 190, 200, 255};
+        int tw, th;
+        GLuint tex;
+
+        /* DEPARTURE label */
+        tex = text_to_texture(md->font_small, "DEPARTURE", c_label, &tw, &th);
+        draw_text_quad(tex, tw, th, cx_left, y, 0); glDeleteTextures(1, &tex);
+        y += 22;
+
+        /* ICAO */
+        tex = text_to_texture(md->font_large, dep_icao, c_white, &tw, &th);
+        draw_text_quad(tex, tw, th, cx_left, y, 0); glDeleteTextures(1, &tex);
+        y += 26;
+
+        /* Weather */
+        char wx_str[64] = "--";
+        if (md->weather_dep.weather[0])
+            snprintf(wx_str, sizeof(wx_str), "%s  %.0f°C",
+                     md->weather_dep.weather, (double)md->weather_dep.temp_c);
+        tex = text_to_texture(md->font_small, wx_str, c_gray, &tw, &th);
+        draw_text_quad(tex, tw, th, cx_left, y, 0); glDeleteTextures(1, &tex);
+        y += 20;
+
+        /* Local time */
+        char dep_time[16] = "--:--";
+        {
+            time_t now_tt = time(NULL);
+            struct tm* tm_info = localtime(&now_tt);
+            if (tm_info) snprintf(dep_time, sizeof(dep_time), "%02d:%02d LT",
+                                  tm_info->tm_hour, tm_info->tm_min);
+        }
+        tex = text_to_texture(md->font_small, dep_time, c_white, &tw, &th);
+        draw_text_quad(tex, tw, th, cx_left, y, 0); glDeleteTextures(1, &tex);
+    }
+
+    /* --- Arrival (right column) --- */
+    {
+        y = map_top + 20;  /* reset y */
+        SDL_Color c_label = {138, 180, 216, 255};
+        SDL_Color c_white = {255, 255, 255, 255};
+        SDL_Color c_gray  = {180, 190, 200, 255};
+        int tw, th;
+        GLuint tex;
+
+        /* ARRIVAL label */
+        tex = text_to_texture(md->font_small, "ARRIVAL", c_label, &tw, &th);
+        draw_text_quad(tex, tw, th, cx_right, y, 0); glDeleteTextures(1, &tex);
+        y += 22;
+
+        /* ICAO */
+        tex = text_to_texture(md->font_large, arr_icao, c_white, &tw, &th);
+        draw_text_quad(tex, tw, th, cx_right, y, 0); glDeleteTextures(1, &tex);
+        y += 26;
+
+        /* Weather */
+        char wx_str[64] = "--";
+        if (md->weather_arr.weather[0])
+            snprintf(wx_str, sizeof(wx_str), "%s  %.0f°C",
+                     md->weather_arr.weather, (double)md->weather_arr.temp_c);
+        tex = text_to_texture(md->font_small, wx_str, c_gray, &tw, &th);
+        draw_text_quad(tex, tw, th, cx_right, y, 0); glDeleteTextures(1, &tex);
+        y += 20;
+
+        /* ETA */
+        char arr_time[16] = "--:--";
+        if (fd.gs_kts > 30.0f) {
+            double flown, total, remain, pct;
+            calc_progress(&fd, md->fmc, &flown, &total, &remain, &pct);
+            if (remain > 1.0) {
+                double hrs = remain / (double)fd.gs_kts;
+                int hh = (int)hrs, mm = (int)((hrs - (double)hh) * 60.0);
+                snprintf(arr_time, sizeof(arr_time), "+%02d:%02d", hh, mm);
+            }
+        }
+        tex = text_to_texture(md->font_small, arr_time, c_white, &tw, &th);
+        draw_text_quad(tex, tw, th, cx_right, y, 0); glDeleteTextures(1, &tex);
+    }
+}
+
+/* =========================================================================
  *  Main render entry
  * ========================================================================= */
 
@@ -889,6 +1024,7 @@ void map_display_render(MapDisplay* md)
 
     begin_2d(md->win_w, md->win_h);
     render_aircraft_sprite(md);
+    render_weather_overlay_2d(md);
     render_header_2d(md);
     render_progress_2d(md);
     render_databar_2d(md);

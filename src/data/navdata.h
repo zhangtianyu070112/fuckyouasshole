@@ -180,8 +180,9 @@ typedef struct FMCState {
     uint32_t       message_ticks;    /* When message was set (for timeout) */
 
     /* Navigation database */
-    Waypoint       nav_waypoints[512];
+    Waypoint*      nav_waypoints;   /* dynamic array, loaded from dat files */
     int            nav_wpt_count;
+    int            nav_wpt_capacity;
     Airport        nav_airports[256];
     int            nav_apt_count;
 

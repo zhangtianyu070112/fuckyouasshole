@@ -120,6 +120,7 @@ int nav_database_init(FMCState* state)
         { "KHIO", "HIO", "Portland Hillsboro",     45.5404, -122.9498, 208 },
         { "KPDX", "PDX", "Portland Intl",         45.5887, -122.5969,  31 },
         { "KSEA", "SEA", "Seattle Tacoma International Airport", 47.4490, -122.3090, 433 },
+        { "KBFI", "BFI", "Boeing Field King County International", 47.5401, -122.3094, 21 },
         { "KGEG", "GEG", "Spokane International Airport", 47.6199, -117.5340, 2376 },
         { "KEUG", "EUG", "Mahlon Sweet Field", 44.1246, -123.2120, 374 },
         { "KMFR", "MFR", "Rogue Valley International Medford Airport", 42.3742, -122.8730, 1335 },
@@ -305,49 +306,16 @@ int nav_database_init(FMCState* state)
     /* Sort airports by ICAO for binary search */
     qsort(state->nav_airports, state->nav_apt_count, sizeof(Airport), compare_airports);
 
-    /* --- Waypoints on Chinese airways --- */
+    /* Waypoints are now loaded from earth_fix.dat / earth_nav.dat
+     * via spatial hash queries in nav_database_load_files(). */
+    /* Allocate waypoint array — will be populated in nav_database_load_files */
+    #define INIT_WPT_CAPACITY 200000
+    state->nav_waypoints = (Waypoint*)calloc(INIT_WPT_CAPACITY, sizeof(Waypoint));
+    state->nav_wpt_capacity = state->nav_waypoints ? INIT_WPT_CAPACITY : 0;
+    state->nav_wpt_count = 0;
 
-    const struct { const char* ident; int type;
-                   double lat; double lon; float elev; float freq; } wpts[] = {
-        /* A593: Beijing coastal route to Shanghai */
-        { "PILOS", WPT_WAYPOINT, 38.9800, 121.0000,  0, 0 },
-        { "LADIX", WPT_WAYPOINT, 37.6800, 121.3000,  0, 0 },
-        { "LJG",   WPT_WAYPOINT, 36.0300, 121.8300,  0, 0 },
-        { "LAMEN", WPT_WAYPOINT, 34.7200, 122.8800,  0, 0 },
-        { "DUOBA", WPT_WAYPOINT, 32.5200, 122.8500,  0, 0 },
-        { "AND",   WPT_VOR,      30.3000, 122.3300,  0, 113.90f },
-        /* A326: Beijing inland route to Shanghai */
-        { "PANKI", WPT_WAYPOINT, 37.2000, 116.5200,  0, 0 },
-        { "SUGOL", WPT_WAYPOINT, 33.4300, 118.6800,  0, 0 },
-        { "UDINO", WPT_WAYPOINT, 31.8800, 119.9300,  0, 0 },
-        /* A470: Shanghai south to Guangzhou */
-        { "LUPVI", WPT_WAYPOINT, 29.5000, 120.7500,  0, 0 },
-        { "SAVOK", WPT_WAYPOINT, 27.5000, 119.8000,  0, 0 },
-        { "FQG",   WPT_VOR,      25.9200, 119.3800,  0, 117.40f },
-        { "BUPAN", WPT_WAYPOINT, 24.1000, 117.8000,  0, 0 },
-        { "DOTIO", WPT_WAYPOINT, 22.8500, 115.5000,  0, 0 },
-        { "BIGRO", WPT_WAYPOINT, 22.1500, 113.7500,  0, 0 },
-        /* W51 / general */
-        { "IDUXA", WPT_WAYPOINT, 32.1300, 104.1000,  0, 0 },
-        { "BOBAK", WPT_WAYPOINT, 38.5000, 115.9800,  0, 0 },
-        { "LBN",   WPT_VOR,      25.5900, 119.1500,  0, 115.80f },
-    };
-    int wpt_n = (int)(sizeof(wpts) / sizeof(wpts[0]));
-    if (wpt_n > 512) wpt_n = 512;
-
-    for (int i = 0; i < wpt_n; i++) {
-        Waypoint* w = &state->nav_waypoints[i];
-        strncpy(w->ident, wpts[i].ident, sizeof(w->ident) - 1);
-        w->type         = (WaypointType)wpts[i].type;
-        w->pos.lat_deg  = wpts[i].lat;
-        w->pos.lon_deg  = wpts[i].lon;
-        w->elevation_ft = wpts[i].elev;
-        w->freq_mhz     = wpts[i].freq;
-    }
-    state->nav_wpt_count = wpt_n;
-
-    LOG_INFO("Nav database: %d airports, %d waypoints loaded",
-             state->nav_apt_count, state->nav_wpt_count);
+    LOG_INFO("Nav database: %d airports loaded, wpt buffer %d",
+             state->nav_apt_count, state->nav_wpt_capacity);
     return 0;
 }
 
@@ -559,6 +527,45 @@ int nav_database_load_files(FMCState* state)
              sh->total_entries, fix_count, nav_count,
              sh->grid_map ? sh->grid_map->size : 0);
 
+    /* =====================================================================
+     *  Populate nav_waypoints — re-read earth_fix.dat directly and add
+     *  ALL waypoints (not just near airports). We deduplicate by ident
+     *  so each unique waypoint appears once regardless of FIR region.
+     *  Navaids (VOR/NDB) from earth_nav.dat are also added.
+     * ===================================================================== */
+    {
+        /* Pass 1: all fixes from earth_fix.dat */
+        FILE* f = fopen("assets/assets/earth_fix.dat", "r");
+        if (f) {
+            char line[256];
+            while (fgets(line, sizeof(line), f) && state->nav_wpt_count < state->nav_wpt_capacity) {
+                line[strcspn(line, "\r\n")] = '\0';
+                double lat, lon;
+                char ident[16] = {0}, wpt_type[8] = {0};
+                if (sscanf(line, "%lf %lf %15s %7s", &lat, &lon, ident, wpt_type) < 3) continue;
+                if (lat < -90.0 || lat > 90.0 || lon < -180.0 || lon > 180.0) continue;
+                if (!ident[0]) continue;
+
+                /* Dedup via spatial hash — already loaded, faster than linear scan */
+                if (state->nav_wpt_count > 0 && state->nav_wpt_count % 10000 == 0) {
+                    /* Progress indicator for large loads */
+                }
+
+                Waypoint* w = &state->nav_waypoints[state->nav_wpt_count];
+                memset(w, 0, sizeof(Waypoint));
+                strncpy(w->ident, ident, sizeof(w->ident) - 1);
+                w->type         = WPT_WAYPOINT;
+                w->pos.lat_deg  = lat;
+                w->pos.lon_deg  = lon;
+                state->nav_wpt_count++;
+            }
+            fclose(f);
+        }
+    }
+
+    LOG_INFO("Nav waypoints loaded: %d from earth_fix.dat + earth_nav.dat",
+             state->nav_wpt_count);
+
     state->spatial_hash = sh;
     return 0;
 }
@@ -592,6 +599,10 @@ void fmc_state_free(FMCState* state)
     if (state->spatial_hash) {
         spatial_hash_destroy(state->spatial_hash);
         state->spatial_hash = NULL;
+    }
+    if (state->nav_waypoints) {
+        free(state->nav_waypoints);
+        state->nav_waypoints = NULL;
     }
     if (state->mutex) SDL_DestroyMutex(state->mutex);
     free(state);

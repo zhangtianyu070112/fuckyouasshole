@@ -20,7 +20,7 @@
 #define DEG2RAD(d)        ((d) * M_PI / 180.0)
 #define RAD2DEG(r)        ((r) * 180.0 / M_PI)
 #define LAT_GRID_DEG      1.0        /* Latitude band height in degrees */
-#define MAX_NEIGHBORS     25         /* 5×5 grid coverage */
+#define MAX_NEIGHBORS     49         /* 7×7 grid coverage (~180 NM radius) */
 #define MAX_RESULT_CAP    512        /* Hard cap to protect memory */
 
 /* =========================================================================
@@ -226,11 +226,11 @@ int spatial_hash_query(const SpatialHash* sh,
     int32_t center_lat_band = (int32_t)(center_key >> 32);
     int32_t center_lon_sec  = (int32_t)(center_key & 0xFFFFFFFF);
 
-    for (int dlat = -2; dlat <= 2 && neighbor_count < MAX_NEIGHBORS; dlat++) {
+    for (int dlat = -3; dlat <= 3 && neighbor_count < MAX_NEIGHBORS; dlat++) {
         int32_t lb = center_lat_band + dlat;
         if (lb < 0 || lb > 180) continue;
 
-        for (int dlon = -2; dlon <= 2 && neighbor_count < MAX_NEIGHBORS; dlon++) {
+        for (int dlon = -3; dlon <= 3 && neighbor_count < MAX_NEIGHBORS; dlon++) {
             int32_t ls = center_lon_sec + dlon;
             if (ls < 0) continue;
 

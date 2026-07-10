@@ -700,13 +700,18 @@ static void rte_activate(FMCData* d)
         return;
     }
 
+    LOG_INFO("FMC RTE: activating %s → %s", orig, dest);
+
     /* Verify both airports exist in the graph */
     if (fp->departure.pos.lat_deg == 0.0 && fp->departure.pos.lon_deg == 0.0) {
         const Airport* apt = nav_find_airport(d->fmc, orig);
         if (apt) {
             fp->departure = *apt;
+            LOG_INFO("FMC RTE: origin %s found at %.4f %.4f",
+                     orig, apt->pos.lat_deg, apt->pos.lon_deg);
         } else {
             set_message(d, "ORIGIN NOT IN DATABASE");
+            LOG_WARN("FMC RTE: origin '%s' not in nav_airports", orig);
             return;
         }
     }
@@ -715,11 +720,17 @@ static void rte_activate(FMCData* d)
         const Airport* apt = nav_find_airport(d->fmc, dest);
         if (apt) {
             fp->arrival = *apt;
+            LOG_INFO("FMC RTE: dest %s found at %.4f %.4f",
+                     dest, apt->pos.lat_deg, apt->pos.lon_deg);
         } else {
             set_message(d, "DEST NOT IN DATABASE");
+            LOG_WARN("FMC RTE: dest '%s' not in nav_airports", dest);
             return;
         }
     }
+
+    LOG_INFO("FMC RTE: searching graph — %d nodes, orig=%s dest=%s",
+             d->graph ? d->graph->node_count : -1, orig, dest);
 
     /* Set defaults */
     if (fp->cruise_altitude_ft < 100.0f) fp->cruise_altitude_ft = 35000.0f;
