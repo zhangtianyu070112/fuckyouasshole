@@ -19,6 +19,7 @@
 
 #include "eicas.h"
 #include "app.h"
+#include "ai/ai_advisor.h"
 #include "data/flight_data.h"
 #include "utils/math_util.h"
 #include "utils/font_manager.h"
@@ -99,6 +100,11 @@ typedef struct {
     AlertDef    prev_alerts[12]; /* Previous frame alert states */
     int         prev_alert_count;
     int         prev_initialized;
+
+    /* AI Advisor access */
+    App*        app;             /* Saved from on_init to reach ai_advisor */
+    const char* ai_text;         /* Cached advisory text pointer, or NULL */
+    int         ai_show;         /* 1 = render AI advisory line */
 } EICASData;
 
 static void set_col(SDL_Renderer* r, uint8_t R, uint8_t G, uint8_t B, uint8_t A)
@@ -324,8 +330,8 @@ static void draw_fuel_qty_box(SDL_Renderer* r, int x, int y, int w, int h,
 
 static void eicas_on_init(Instrument* self, App* app)
 {
-    (void)app;
     EICASData* d = (EICASData*)self->private_data;
+    d->app = app;
     d->smooth_n1[0] = 0.0f; d->smooth_n1[1] = 0.0f;
     d->smooth_egt[0] = 0.0f; d->smooth_egt[1] = 0.0f;
     d->smooth_ff[0] = 0.0f; d->smooth_ff[1] = 0.0f;
@@ -387,6 +393,14 @@ static void eicas_on_update(Instrument* self, const FlightData* fd, float dt)
         memcpy(d->prev_alerts, current, sizeof(current));
         d->prev_alert_count = count;
         d->prev_initialized = 1;
+    }
+
+    /* --- AI Advisor text --- */
+    if (d->app && d->app->ai_advisor) {
+        d->ai_text = ai_advisor_get_advisory(d->app->ai_advisor);
+        d->ai_show  = (d->ai_text != NULL && d->ai_text[0] != '\0');
+    } else {
+        d->ai_show = 0;
     }
 }
 
@@ -511,15 +525,57 @@ static void eicas_on_render(Instrument* self, SDL_Renderer* renderer)
                            table_x + table_w, tab_y + tab_h);
     }
 
-    /* === Fuel QTY box (right side, below tables) === */
+    /* === Fuel QTY box (right side, compact — 1/5 of original) === */
     {
-        int fuel_x = table_x + table_w / 4;    /* Center the fuel box */
+        int fuel_x = table_x + table_w / 4;
         int fuel_w = table_w / 2;
         int fuel_y = engine_top + 120;
-        int fuel_h = rect->y + rect->h - fuel_y - 8;
-        if (fuel_h < 80) fuel_h = 80;
+        int fuel_h = 60;  /* fixed compact height */
         draw_fuel_qty_box(renderer, fuel_x, fuel_y, fuel_w, fuel_h,
                           f->fuel_total_lbs);
+    }
+
+    /* === AI ADVISORY — prominent bottom bar === */
+    {
+        int ai_y     = rect->y + rect->h - 52;  /* 52px tall bar */
+        int ai_bg_h  = 52;
+
+        /* Dark background bar */
+        set_col(renderer, 0x08, 0x0C, 0x14, 255);
+        SDL_Rect ai_bg = { rect->x + 2, ai_y, rect->w - 4, ai_bg_h };
+        SDL_RenderFillRect(renderer, &ai_bg);
+
+        /* Top & bottom separator lines */
+        set_col(renderer, 0x30, 0x30, 0x40, 255);
+        SDL_RenderDrawLine(renderer, rect->x + 2, ai_y,
+                           rect->x + rect->w - 2, ai_y);
+        SDL_RenderDrawLine(renderer, rect->x + 2, ai_y + ai_bg_h,
+                           rect->x + rect->w - 2, ai_y + ai_bg_h);
+
+        /* "AI" label */
+        set_col(renderer, COL_CYAN);
+        font_draw_scaled_aligned(renderer, rect->x + 14, ai_y + 28,
+                                 "AI", 0.85f, FONT_BOLD, FONT_ALIGN_LEFT);
+
+        /* Advisory text or placeholder — uses FONT_CJK for Chinese */
+        if (d->ai_show && d->ai_text) {
+            int has_gpws = d->fd.master_warning;
+            set_col(renderer, has_gpws ? COL_GRAY : 0xE0, 0xE0, 0xE0, 255);
+            font_draw_scaled_aligned(renderer, rect->x + 60, ai_y + 28,
+                                     d->ai_text, 0.80f,
+                                     FONT_CJK, FONT_ALIGN_LEFT);
+            if (has_gpws) {
+                set_col(renderer, COL_GRAY);
+                font_draw_scaled_aligned(renderer,
+                    rect->x + rect->w - 10, ai_y + 28,
+                    "(SUPPL)", 0.45f, FONT_REGULAR, FONT_ALIGN_RIGHT);
+            }
+        } else {
+            set_col(renderer, 0x40, 0x40, 0x50, 255);
+            font_draw_scaled_aligned(renderer, rect->x + 60, ai_y + 28,
+                                     "-- waiting --", 0.70f,
+                                     FONT_REGULAR, FONT_ALIGN_LEFT);
+        }
     }
 
     /* Border */

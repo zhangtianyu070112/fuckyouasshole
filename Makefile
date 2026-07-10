@@ -21,9 +21,9 @@ DBG_FLAGS    := -g -O0 -DDEBUG
 
 # Include paths: src/ for "data/xxx.h" style, instruments/ for instrument.h,
 # build/<module>/ for module headers (config.h, app.h, event.h, thread.h)
-MOD_NAMES    := config event main thread app
+MOD_NAMES    := config event main thread app ai
 MOD_INC      := $(foreach mod,$(MOD_NAMES),-Ibuild/$(mod))
-INC_FLAGS    := -Isrc -Iinstruments $(MOD_INC) $(SDL_CFLAGS)
+INC_FLAGS    := -Isrc -Isrc/ai -Iinstruments $(MOD_INC) $(SDL_CFLAGS)
 LDFLAGS      := -lws2_32 -lm $(SDL_LIBS)
 
 # If SDL2_gfx is available, include it

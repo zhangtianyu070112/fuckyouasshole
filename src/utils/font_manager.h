@@ -25,6 +25,7 @@ typedef enum {
     FONT_BOLD,           /* B612-Bold.ttf     — titles & warnings          */
     FONT_MONO,           /* B612Mono-Regular.ttf — FMC/CDU scratchpad      */
     FONT_MONO_BOLD,      /* B612Mono-Bold.ttf — FMC/CDU titles             */
+    FONT_CJK,            /* ALIBABAPUHUITI-2-45-LIGHT.TTF — CJK text       */
     FONT_COUNT
 } FontID;
 

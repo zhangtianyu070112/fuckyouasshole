@@ -26,6 +26,7 @@ typedef struct MockDataCtx MockDataCtx;
 typedef struct AlertSystem AlertSystem;
 typedef struct UDPSocket   UDPSocket;
 typedef struct MapDisplay  MapDisplay;
+typedef struct AIAdvisor   AIAdvisor;
 
 /**
  * @brief Top-level application state.
@@ -81,6 +82,9 @@ typedef struct App {
 
     /* Cabin moving map display (native SDL2) */
     MapDisplay*    map_display;
+
+    /* AI Co-pilot advisor (WebSocket to inference server) */
+    AIAdvisor*     ai_advisor;
 
 } App;
 

@@ -28,6 +28,7 @@
 #include "audio/alert_system.h"
 #include "utils/font_manager.h"
 #include "map/map_display.h"
+#include "ai/ai_advisor.h"
 
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
@@ -614,6 +615,11 @@ static void main_loop(App* app)
             map_display_render(app->map_display);
         }
 
+        /* 3d. Update AI advisor (non-blocking WebSocket) */
+        if (app->ai_advisor) {
+            ai_advisor_update(app->ai_advisor, &snapshot);
+        }
+
         /* 4. Update all instruments */
         for (int i = 0; i < app->instrument_count; i++) {
             Instrument* inst = app->instruments[i];
@@ -1067,6 +1073,24 @@ int app_run_with_config(const char* config_path)
     /* 8c. Start Cabin Map Display */
     app->map_display = map_display_create(app->config, app->fmc_state);
 
+    /* 8d. Start AI Co-pilot advisor (WebSocket to inference server) */
+    {
+        int ai_enabled = config_get_bool(app->config, "ai", "enabled", 0);
+        if (ai_enabled) {
+            app->ai_advisor = ai_advisor_create(app->config);
+            if (app->ai_advisor) {
+                const char* ai_host = config_get_str(app->config, "ai",
+                    "inference_host", "127.0.0.1");
+                int ai_port = (int)config_get_int(app->config, "ai",
+                    "inference_port", 8090);
+                fprintf(stderr, "[STARTUP] AI Advisor: connecting to %s:%d\n",
+                        ai_host, ai_port);
+            }
+        } else {
+            app->ai_advisor = NULL;
+        }
+    }
+
     /* 9. Main loop */
     main_loop(app);
 
@@ -1105,6 +1129,12 @@ cleanup:
     if (app->map_display) {
         map_display_destroy(app->map_display);
         app->map_display = NULL;
+    }
+
+    /* Stop AI Co-pilot advisor */
+    if (app->ai_advisor) {
+        ai_advisor_destroy(app->ai_advisor);
+        app->ai_advisor = NULL;
     }
 
     /* Destroy alert system */

@@ -27,10 +27,11 @@
 
 /* TTF filenames indexed by FontID */
 static const char* FONT_FILENAMES[FONT_COUNT] = {
-    "B612-Regular.ttf",         /* FONT_REGULAR    */
-    "B612-Bold.ttf",            /* FONT_BOLD       */
-    "B612Mono-Regular.ttf",     /* FONT_MONO       */
-    "B612Mono-Bold.ttf",        /* FONT_MONO_BOLD  */
+    "B612-Regular.ttf",                /* FONT_REGULAR    */
+    "B612-Bold.ttf",                   /* FONT_BOLD       */
+    "B612Mono-Regular.ttf",            /* FONT_MONO       */
+    "B612Mono-Bold.ttf",               /* FONT_MONO_BOLD  */
+    "ALIBABAPUHUITI-2-45-LIGHT.TTF",   /* FONT_CJK        */
 };
 
 /* =========================================================================
