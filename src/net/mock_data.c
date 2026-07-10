@@ -319,6 +319,13 @@ int mock_data_thread(void* userdata)
             d.fuel_flow_total_pph = d.fuel_flow_pph[0] + d.fuel_flow_pph[1];
             d.fuel_total_lbs      = 15000.0f - sim_time * 15.0f; /* fuel burn */
             if (d.fuel_total_lbs < 1000.0f) d.fuel_total_lbs = 15000.0f; /* reset per loop */
+            /* Per-tank distribution (B737: ~46% left wing, ~8% center, ~46% right wing) */
+            {
+                float remaining = d.fuel_total_lbs;
+                d.fuel_tank_lbs[0] = remaining * 0.46f;  /* left wing  */
+                d.fuel_tank_lbs[1] = remaining * 0.08f;  /* center     */
+                d.fuel_tank_lbs[2] = remaining * 0.46f;  /* right wing */
+            }
         }
 
         /* --- Flight controls --- */

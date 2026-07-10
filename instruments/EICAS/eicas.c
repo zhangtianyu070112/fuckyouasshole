@@ -13,7 +13,7 @@
  *   │  EGT   │  EGT   │                    │
  *   │  bar   │  bar   │                    │
  *   ├────────┼────────┼────────────────────┤
- *   │  Fuel flow / total fuel              │
+ *   │  Fuel flow / tank qty (L/C/R) + total  │
  *   └──────────────────────────────────────┘
  */
 
@@ -286,10 +286,21 @@ static void draw_eng_tables(SDL_Renderer* r, int x, int y, int w,
 
 /* =========================================================================
  *  Fuel QTY box (bottom-right)
+ *
+ *  Layout:
+ *    ┌──────────────────────────┐
+ *    │       FUEL QTY           │
+ *    │       LBS x1000          │
+ *    │                          │
+ *    │   12.3   3.1   12.3      │  ← tank values (green)
+ *    │    L     CTR     R       │  ← tank labels (cyan)
+ *    │                          │
+ *    │     TOTAL    27.7        │  ← total (cyan + green)
+ *    └──────────────────────────┘
  * ========================================================================= */
 
 static void draw_fuel_qty_box(SDL_Renderer* r, int x, int y, int w, int h,
-                              float fuel_lbs)
+                              const float fuel_tank_lbs[3], float fuel_total_lbs)
 {
     /* Box border */
     set_col(r, COL_GRAY);
@@ -304,24 +315,55 @@ static void draw_fuel_qty_box(SDL_Renderer* r, int x, int y, int w, int h,
     /* Title */
     set_col(r, COL_WHITE);
     draw_text_simple(r, x + w / 2, cy, "FUEL QTY", 0.55f);
-    cy += 16;
+    cy += 14;
 
     /* Unit */
     set_col(r, COL_CYAN);
     draw_text_simple(r, x + w / 2, cy, "LBS x1000", 0.45f);
     cy += 18;
 
-    /* Value — large */
-    float fuel_1000 = fuel_lbs / 1000.0f;
-    char val_str[12];
-    snprintf(val_str, sizeof(val_str), "%.1f", (double)fuel_1000);
-    set_col(r, COL_GREEN);
-    draw_text_simple(r, x + w / 2, cy, val_str, 0.85f);
-    cy += 20;
+    /* Three tank columns (left / center / right) */
+    {
+        int col_w = w / 3;
+        char val_str[3][12];
 
-    /* TOTAL label */
-    set_col(r, COL_CYAN);
-    draw_text_simple(r, x + w / 2, cy, "TOTAL", 0.5f);
+        /* Tank values */
+        for (int i = 0; i < 3; i++) {
+            float v = (fuel_tank_lbs) ? (fuel_tank_lbs[i] / 1000.0f) : 0.0f;
+            snprintf(val_str[i], sizeof(val_str[i]), "%.1f", (double)v);
+        }
+        set_col(r, COL_GREEN);
+        for (int i = 0; i < 3; i++) {
+            int vx = x + col_w / 2 + i * col_w;
+            draw_text_simple(r, vx, cy, val_str[i], 0.65f);
+        }
+        cy += 16;
+
+        /* Tank labels */
+        static const char* tank_labels[] = { "L", "CTR", "R" };
+        set_col(r, COL_CYAN);
+        for (int i = 0; i < 3; i++) {
+            int vx = x + col_w / 2 + i * col_w;
+            draw_text_simple(r, vx, cy, tank_labels[i], 0.43f);
+        }
+        cy += 18;
+    }
+
+    /* TOTAL line */
+    {
+        char total_str[12];
+        float total_1000 = fuel_total_lbs / 1000.0f;
+        snprintf(total_str, sizeof(total_str), "%.1f", (double)total_1000);
+
+        /* "TOTAL" label — right-aligned near center */
+        set_col(r, COL_CYAN);
+        font_draw_scaled_aligned(r, x + w / 2 - 10, cy, "TOTAL",
+                                 0.48f, FONT_REGULAR, FONT_ALIGN_RIGHT);
+        /* Total value — left-aligned next to label */
+        set_col(r, COL_GREEN);
+        font_draw_scaled_aligned(r, x + w / 2 - 2, cy, total_str,
+                                 0.55f, FONT_REGULAR, FONT_ALIGN_LEFT);
+    }
 }
 
 /* =========================================================================
@@ -525,14 +567,14 @@ static void eicas_on_render(Instrument* self, SDL_Renderer* renderer)
                            table_x + table_w, tab_y + tab_h);
     }
 
-    /* === Fuel QTY box (right side, compact — 1/5 of original) === */
+    /* === Fuel QTY box (right side) === */
     {
         int fuel_x = table_x + table_w / 4;
         int fuel_w = table_w / 2;
         int fuel_y = engine_top + 120;
-        int fuel_h = 60;  /* fixed compact height */
+        int fuel_h = 88;  /* taller for L/CTR/R tank display */
         draw_fuel_qty_box(renderer, fuel_x, fuel_y, fuel_w, fuel_h,
-                          f->fuel_total_lbs);
+                          f->fuel_tank_lbs, f->fuel_total_lbs);
     }
 
     /* === AI ADVISORY — prominent bottom bar === */

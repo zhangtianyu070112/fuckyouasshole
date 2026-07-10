@@ -191,7 +191,13 @@ static void apply_data_group(FlightDataValues* f, int index,
     case 62:
         {
             float total = 0.0f;
-            for (int i = 0; i < num_vals && i < 8; i++)
+            /* Store individual tank values: left[0], center[1], right[2] */
+            for (int i = 0; i < num_vals && i < 3; i++) {
+                f->fuel_tank_lbs[i] = vals[i];
+                total += vals[i];
+            }
+            /* Sum any extra tanks beyond the first 3 */
+            for (int i = 3; i < num_vals && i < 8; i++)
                 total += vals[i];
             if (total > 0.0f) f->fuel_total_lbs = total;
         }

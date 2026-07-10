@@ -61,6 +61,7 @@ typedef struct FlightDataValues {
 
     /* --- Fuel --- */
     float fuel_total_lbs;     /* Total fuel remaining (lbs) */
+    float fuel_tank_lbs[3];   /* Per-tank fuel: [0]=left, [1]=center, [2]=right (lbs) */
     float fuel_flow_total_pph;/* Total fuel flow (lbs/hour) */
 
     /* --- Flight controls --- */
