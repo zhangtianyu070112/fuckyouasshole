@@ -20,6 +20,7 @@
 #include "net/xplane.h"
 #include "data/flight_data.h"
 #include "data/navdata.h"
+#include "data/departure_db.h"
 #include "data/route_graph.h"
 #include "ds/avl_tree.h"
 #include "ds/hash_table.h"
@@ -142,6 +143,12 @@ typedef struct {
     int     hovered_button;    /* index into buttons[], or -1 */
     int     clicked_button;    /* index into buttons[], or -1 */
     Uint32  click_time;        /* SDL_GetTicks() when last click happened */
+
+    /* DEP/ARR departure configuration state machine */
+    int    dep_state;          /* 0=idle, 1=runway_select, 2=sid_select */
+    char   dep_apt_icao[8];    /* Selected departure airport ICAO */
+    char   dep_sel_rwy[8];     /* Selected runway */
+    int    dep_scroll;         /* Scroll offset for lists */
 } FMCData;
 
 /* =========================================================================
@@ -473,7 +480,7 @@ static void build_legs_page(FMCData* d)
     /* Navigation hints */
     snprintf(d->display[10], 25, " L:INS B4  R:INS AF/DEL");
     if (count > 5) {
-        snprintf(d->display[11], 25, " <LEGS   PG DN   SORT> ");
+        snprintf(d->display[11], 25, " <LEGS  PG UP/DN  SORT> ");
     } else {
         snprintf(d->display[11], 25, " <LEGS          SORT> ");
     }
@@ -577,29 +584,79 @@ static void build_dep_arr_page(FMCData* d)
     memset(d->display, ' ', sizeof(d->display));
     FlightPlan* fp = d->fmc ? &d->fmc->flight_plan : NULL;
 
-    snprintf(d->display[0], 25, " DEP             ARR   ");
-    snprintf(d->display[1], 25, " <%-8s      %-8s> ", 
-        (fp && fp->departure.icao[0]) ? fp->departure.icao : "----",
-        (fp && fp->arrival.icao[0]) ? fp->arrival.icao : "----");
+    if (d->dep_state == 0) {
+        /* --- State 0: Idle / overview --- */
+        snprintf(d->display[0], 25, " DEP             ARR   ");
+        snprintf(d->display[1], 25, " <%-8s      %-8s> ",
+            (fp && fp->departure.icao[0]) ? fp->departure.icao : "----",
+            (fp && fp->arrival.icao[0]) ? fp->arrival.icao : "----");
 
-    snprintf(d->display[2], 25, "                       ");
-    snprintf(d->display[3], 25, "                       ");
+        snprintf(d->display[2], 25, "                       ");
+        snprintf(d->display[3], 25, "                       ");
+        snprintf(d->display[4], 25, " SID               STAR ");
+        snprintf(d->display[5], 25, " %-8s          %-8s ",
+            (fp && fp->sid.name[0]) ? fp->sid.name : "----",
+            (fp && fp->star.name[0]) ? fp->star.name : "----");
+        snprintf(d->display[6], 25, " RUNWAY          RUNWAY ");
+        snprintf(d->display[7], 25, " %-8s          %-8s ",
+            (fp && fp->sid.runway[0]) ? fp->sid.runway : "----",
+            (fp && fp->star.runway[0]) ? fp->star.runway : "----");
+        snprintf(d->display[8], 25, "                       ");
+        snprintf(d->display[9], 25, "                       ");
+        snprintf(d->display[10], 25, " TYPE ICAO→LSK L1      ");
+        snprintf(d->display[11], 25, " <INDEX                ");
+    } else {
+        /* --- State 1/2: runway or SID selection --- */
+        const DepartureAirport* apt = NULL;
+        if (d->app && d->app->dep_db)
+            apt = dep_db_find(d->app->dep_db, d->dep_apt_icao);
 
-    /* Show current SID/STAR if any */
-    snprintf(d->display[4], 25, " SID               STAR ");
-    snprintf(d->display[5], 25, " %-8s          %-8s ", 
-        (fp && fp->sid.name[0]) ? fp->sid.name : "----",
-        (fp && fp->star.name[0]) ? fp->star.name : "----");
+        snprintf(d->display[0], 25, " DEP: %-4s          ",
+                 d->dep_apt_icao[0] ? d->dep_apt_icao : "----");
 
-    snprintf(d->display[6], 25, " RUNWAY          RUNWAY ");
-    snprintf(d->display[7], 25, " %-8s          %-8s ", 
-        (fp && fp->sid.runway[0]) ? fp->sid.runway : "----",
-        (fp && fp->star.runway[0]) ? fp->star.runway : "----");
+        if (d->dep_state == 1) {
+            /* Runway selection */
+            snprintf(d->display[1], 25, " SEL RUNWAY>          ");
+            if (apt) {
+                int max_show = 4;
+                int total = apt->runway_count;
+                int start = d->dep_scroll;
+                if (start > total - max_show) start = total - max_show;
+                if (start < 0) start = 0;
 
-    snprintf(d->display[8], 25, "                       ");
-    snprintf(d->display[9], 25, "                       ");
-    snprintf(d->display[10], 25, "                       ");
-    snprintf(d->display[11], 25, " <INDEX                ");
+                for (int i = 0; i < max_show && (start + i) < total; i++) {
+                    snprintf(d->display[2 + i * 2], 25, "                       ");
+                    snprintf(d->display[3 + i * 2], 25, " <%-8s              ",
+                             apt->runways[start + i]);
+                }
+            } else {
+                snprintf(d->display[3], 25, " AIRPORT NOT FOUND     ");
+            }
+        } else {
+            /* SID selection (state 2) */
+            snprintf(d->display[1], 25, " RWY:%-4s SEL SID>  ",
+                     d->dep_sel_rwy);
+            if (apt) {
+                char sid_list[DEP_DB_MAX_SIDS][16];
+                int total = dep_db_get_sids_for_runway(apt, d->dep_sel_rwy, sid_list);
+                if (total < 0) total = 0;
+                int max_show = 4;
+                int start = d->dep_scroll;
+                if (start > total - max_show) start = total - max_show;
+                if (start < 0) start = 0;
+
+                for (int i = 0; i < max_show && (start + i) < total; i++) {
+                    snprintf(d->display[2 + i * 2], 25, "                       ");
+                    snprintf(d->display[3 + i * 2], 25, " <%-8s              ",
+                             sid_list[start + i]);
+                }
+            }
+        }
+
+        /* Navigation hints */
+        snprintf(d->display[10], 25, " LSK←SELECT  R6←BACK  ");
+        snprintf(d->display[11], 25, " <BACK                 ");
+    }
 
     for (int i = 0; i < 12; i++) d->display[i][24] = '\0';
 }
@@ -619,12 +676,13 @@ static void build_clb_page(FMCData* d)
              fp ? (int)fp->climb_tgt_spd_kts : 280);
     
     snprintf(d->display[6], 25, " SPD REST              ");
-    snprintf(d->display[7], 25, " %03d/%05d             ", 
+    snprintf(d->display[7], 25, " %03d/%05d             ",
              fp ? (int)fp->climb_spd_rest_kts : 250,
              fp ? (int)fp->climb_spd_rest_alt_ft : 10000);
 
-    snprintf(d->display[8], 25, "                       ");
-    snprintf(d->display[9], 25, "                       ");
+    snprintf(d->display[8], 25, " TRANS ALT             ");
+    snprintf(d->display[9], 25, " %05.0f                 ",
+             fp ? (double)fp->transition_altitude_ft : 18000.0);
     snprintf(d->display[10], 25, "                       ");
     snprintf(d->display[11], 25, " <CLB                  ");
 
@@ -669,12 +727,13 @@ static void build_des_page(FMCData* d)
              fp ? (int)fp->descent_tgt_spd_kts : 280);
     
     snprintf(d->display[6], 25, " SPD REST              ");
-    snprintf(d->display[7], 25, " %03d/%05d             ", 
+    snprintf(d->display[7], 25, " %03d/%05d             ",
              fp ? (int)fp->descent_spd_rest_kts : 250,
              fp ? (int)fp->descent_spd_rest_alt_ft : 10000);
 
-    snprintf(d->display[8], 25, "                       ");
-    snprintf(d->display[9], 25, "                       ");
+    snprintf(d->display[8], 25, " DES ANGLE             ");
+    snprintf(d->display[9], 25, " %03.1f\xc2\xb0                ",
+             fp ? (double)fp->descent_angle_deg : 3.0);
     snprintf(d->display[10], 25, "                       ");
     snprintf(d->display[11], 25, " <DES                  ");
 
@@ -1032,11 +1091,14 @@ static void handle_lsk(FMCData* d, int side, int line)
             } else {
                 /* === RIGHT LSK === */
                 if (line == 5) {
-                    /* R6: PAGE DOWN */
-                    if (fp && fp->waypoint_count > 10) {
-                        d->legs_scroll += 10;
-                        if (d->legs_scroll >= fp->waypoint_count)
-                            d->legs_scroll = 0;
+                    /* R6: PAGE DOWN — scroll waypoint list forward */
+                    if (fp && fp->waypoint_count > 5) {
+                        int max_scroll = fp->waypoint_count - 5;
+                        if (d->legs_scroll < max_scroll) {
+                            d->legs_scroll += 5;
+                            if (d->legs_scroll > max_scroll)
+                                d->legs_scroll = max_scroll;
+                        }
                     }
                 } else if (is_data_row && fp) {
                     if (d->scratchpad[0]) {
@@ -1075,7 +1137,7 @@ static void handle_lsk(FMCData* d, int side, int line)
                             d->fmc->plan_modified = 1;
                             /* Adjust scroll if last page now empty */
                             if (d->legs_scroll >= fp->waypoint_count && d->legs_scroll > 0)
-                                d->legs_scroll -= 10;
+                                d->legs_scroll -= 5;
                             if (d->legs_scroll < 0) d->legs_scroll = 0;
                             char buf[64];
                             snprintf(buf, sizeof(buf), "%s DELETED", ident);
@@ -1101,50 +1163,141 @@ static void handle_lsk(FMCData* d, int side, int line)
         break;
 
     case 6: /* DEP ARR */
-        if (side == 0) {
-            if (line == 2) { /* LSK L3: SID */
-                if (d->scratchpad[0] && fp) {
-                    for (char* p = d->scratchpad; *p; p++)
-                        *p = (char)toupper((unsigned char)*p);
-                    strncpy(fp->sid.name, d->scratchpad, sizeof(fp->sid.name) - 1);
-                    set_message(d, "SID SET");
-                    memset(d->scratchpad, 0, sizeof(d->scratchpad));
-                } else if (fp && fp->sid.name[0]) {
-                    strncpy(d->scratchpad, fp->sid.name, sizeof(d->scratchpad) - 1);
+        if (d->dep_state == 0) {
+            /* --- State 0: Idle --- */
+            if (side == 0) {
+                if (line == 0) {
+                    /* LSK L1: set DEP airport from scratchpad */
+                    if (d->scratchpad[0] && fp) {
+                        for (char* p = d->scratchpad; *p; p++)
+                            *p = (char)toupper((unsigned char)*p);
+                        /* Look up in departure DB */
+                        if (d->app && d->app->dep_db) {
+                            const DepartureAirport* apt =
+                                dep_db_find(d->app->dep_db, d->scratchpad);
+                            if (apt) {
+                                strncpy(fp->departure.icao, d->scratchpad,
+                                        sizeof(fp->departure.icao) - 1);
+                                strncpy(d->dep_apt_icao, d->scratchpad,
+                                        sizeof(d->dep_apt_icao) - 1);
+                                d->dep_state = 1;
+                                d->dep_scroll = 0;
+                                memset(d->dep_sel_rwy, 0, sizeof(d->dep_sel_rwy));
+                                set_message(d, "AIRPORT OK, SEL RWY");
+                            } else {
+                                set_message(d, "AIRPORT NOT FOUND");
+                            }
+                        } else {
+                            set_message(d, "NO DEP DB LOADED");
+                        }
+                        memset(d->scratchpad, 0, sizeof(d->scratchpad));
+                    } else if (fp && fp->departure.icao[0]) {
+                        strncpy(d->scratchpad, fp->departure.icao,
+                                sizeof(d->scratchpad) - 1);
+                    }
+                } else if (line == 5) {
+                    /* LSK L6: stay / back */
                 }
-            } else if (line == 3) { /* LSK L4: SID RWY */
-                if (d->scratchpad[0] && fp) {
-                    for (char* p = d->scratchpad; *p; p++)
-                        *p = (char)toupper((unsigned char)*p);
-                    strncpy(fp->sid.runway, d->scratchpad, sizeof(fp->sid.runway) - 1);
-                    set_message(d, "SID RWY SET");
-                    memset(d->scratchpad, 0, sizeof(d->scratchpad));
-                } else if (fp && fp->sid.runway[0]) {
-                    strncpy(d->scratchpad, fp->sid.runway, sizeof(d->scratchpad) - 1);
+            } else {
+                /* Right side: STAR (free-text, unchanged) */
+                if (line == 2) {
+                    if (d->scratchpad[0] && fp) {
+                        for (char* p = d->scratchpad; *p; p++)
+                            *p = (char)toupper((unsigned char)*p);
+                        strncpy(fp->star.name, d->scratchpad,
+                                sizeof(fp->star.name) - 1);
+                        set_message(d, "STAR SET");
+                        memset(d->scratchpad, 0, sizeof(d->scratchpad));
+                    } else if (fp && fp->star.name[0]) {
+                        strncpy(d->scratchpad, fp->star.name,
+                                sizeof(d->scratchpad) - 1);
+                    }
+                } else if (line == 3) {
+                    if (d->scratchpad[0] && fp) {
+                        for (char* p = d->scratchpad; *p; p++)
+                            *p = (char)toupper((unsigned char)*p);
+                        strncpy(fp->star.runway, d->scratchpad,
+                                sizeof(fp->star.runway) - 1);
+                        set_message(d, "STAR RWY SET");
+                        memset(d->scratchpad, 0, sizeof(d->scratchpad));
+                    } else if (fp && fp->star.runway[0]) {
+                        strncpy(d->scratchpad, fp->star.runway,
+                                sizeof(d->scratchpad) - 1);
+                    }
                 }
-            } else if (line == 5) {
-                d->current_page = 6;
+            }
+        } else if (d->dep_state == 1) {
+            /* --- State 1: Runway selection --- */
+            const DepartureAirport* apt = NULL;
+            if (d->app && d->app->dep_db)
+                apt = dep_db_find(d->app->dep_db, d->dep_apt_icao);
+
+            if (side == 0) {
+                if (line >= 1 && line <= 4) {
+                    /* L2-L5: select runway */
+                    int rwy_idx = d->dep_scroll + (line - 1);
+                    if (apt && rwy_idx >= 0 && rwy_idx < apt->runway_count) {
+                        strncpy(d->dep_sel_rwy, apt->runways[rwy_idx],
+                                sizeof(d->dep_sel_rwy) - 1);
+                        d->dep_state = 2;
+                        d->dep_scroll = 0;
+                        set_message(d, "RWY SET, SEL SID");
+                    }
+                } else if (line == 5) {
+                    /* LSK L6: back to idle */
+                    d->dep_state = 0;
+                    d->dep_scroll = 0;
+                }
+            } else {
+                if (line == 5) {
+                    /* R6: back to idle */
+                    d->dep_state = 0;
+                    d->dep_scroll = 0;
+                }
             }
         } else {
-            if (line == 2) { /* LSK R3: STAR */
-                if (d->scratchpad[0] && fp) {
-                    for (char* p = d->scratchpad; *p; p++)
-                        *p = (char)toupper((unsigned char)*p);
-                    strncpy(fp->star.name, d->scratchpad, sizeof(fp->star.name) - 1);
-                    set_message(d, "STAR SET");
-                    memset(d->scratchpad, 0, sizeof(d->scratchpad));
-                } else if (fp && fp->star.name[0]) {
-                    strncpy(d->scratchpad, fp->star.name, sizeof(d->scratchpad) - 1);
+            /* --- State 2: SID selection --- */
+            const DepartureAirport* apt = NULL;
+            if (d->app && d->app->dep_db)
+                apt = dep_db_find(d->app->dep_db, d->dep_apt_icao);
+
+            if (side == 0) {
+                if (line >= 1 && line <= 4) {
+                    /* L2-L5: select SID */
+                    if (apt) {
+                        char sid_list[DEP_DB_MAX_SIDS][16];
+                        int total = dep_db_get_sids_for_runway(
+                            apt, d->dep_sel_rwy, sid_list);
+                        int sid_idx = d->dep_scroll + (line - 1);
+                        if (sid_idx >= 0 && sid_idx < total) {
+                            /* Set SID in flight plan */
+                            if (fp) {
+                                strncpy(fp->sid.name, sid_list[sid_idx],
+                                        sizeof(fp->sid.name) - 1);
+                                strncpy(fp->sid.runway, d->dep_sel_rwy,
+                                        sizeof(fp->sid.runway) - 1);
+                                d->fmc->plan_modified = 1;
+                            }
+                            d->dep_state = 0;
+                            d->dep_scroll = 0;
+                            char buf[64];
+                            snprintf(buf, sizeof(buf), "SID %s SET",
+                                     sid_list[sid_idx]);
+                            set_message(d, buf);
+                        }
+                    }
+                } else if (line == 5) {
+                    /* LSK L6: back to runway select */
+                    d->dep_state = 1;
+                    d->dep_scroll = 0;
+                    memset(d->dep_sel_rwy, 0, sizeof(d->dep_sel_rwy));
                 }
-            } else if (line == 3) { /* LSK R4: STAR RWY */
-                if (d->scratchpad[0] && fp) {
-                    for (char* p = d->scratchpad; *p; p++)
-                        *p = (char)toupper((unsigned char)*p);
-                    strncpy(fp->star.runway, d->scratchpad, sizeof(fp->star.runway) - 1);
-                    set_message(d, "STAR RWY SET");
-                    memset(d->scratchpad, 0, sizeof(d->scratchpad));
-                } else if (fp && fp->star.runway[0]) {
-                    strncpy(d->scratchpad, fp->star.runway, sizeof(d->scratchpad) - 1);
+            } else {
+                if (line == 5) {
+                    /* R6: back to runway select */
+                    d->dep_state = 1;
+                    d->dep_scroll = 0;
+                    memset(d->dep_sel_rwy, 0, sizeof(d->dep_sel_rwy));
                 }
             }
         }
@@ -1176,6 +1329,10 @@ static void handle_lsk(FMCData* d, int side, int line)
                     fp->climb_spd_rest_alt_ft = v2;
                     set_message(d, "SPD REST SET");
                 }
+                memset(d->scratchpad, 0, sizeof(d->scratchpad));
+            } else if (line == 4 && d->scratchpad[0] && fp) {
+                fp->transition_altitude_ft = (float)atof(d->scratchpad);
+                set_message(d, "TRANS ALT SET");
                 memset(d->scratchpad, 0, sizeof(d->scratchpad));
             } else if (line == 5) {
                 d->current_page = 7;
@@ -1227,6 +1384,10 @@ static void handle_lsk(FMCData* d, int side, int line)
                     fp->descent_spd_rest_alt_ft = v2;
                     set_message(d, "SPD REST SET");
                 }
+                memset(d->scratchpad, 0, sizeof(d->scratchpad));
+            } else if (line == 4 && d->scratchpad[0] && fp) {
+                fp->descent_angle_deg = (float)atof(d->scratchpad);
+                set_message(d, "DES ANGLE SET");
                 memset(d->scratchpad, 0, sizeof(d->scratchpad));
             } else if (line == 5) {
                 d->current_page = 9;
@@ -1343,11 +1504,47 @@ static int cdu_button_action(FMCData* d, const char* label)
     if (strcmp(label, "FIX")      == 0) { set_message(d, "FIX: NOT IN USE"); return 1; }
     if (strcmp(label, "NAV_RAD")  == 0 || strcmp(label, "NAV RAD") == 0) { d->current_page = 5; return 1; }
     if (strcmp(label, "PREV_PAGE") == 0 || strcmp(label, "PREV PAGE") == 0) {
+        if (d->current_page == 2) {
+            /* LEGS page: scroll waypoints backward */
+            if (d->legs_scroll > 0) {
+                d->legs_scroll -= 5;
+                if (d->legs_scroll < 0) d->legs_scroll = 0;
+            }
+            return 1;
+        }
+        if (d->current_page == 6 && d->dep_state != 0) {
+            /* DEP/ARR page: scroll list backward */
+            if (d->dep_scroll > 0) {
+                d->dep_scroll -= 5;
+                if (d->dep_scroll < 0) d->dep_scroll = 0;
+            }
+            return 1;
+        }
         d->current_page = (d->current_page + 9) % 10;  /* cycle backward */
         d->legs_scroll = 0;
         return 1;
     }
     if (strcmp(label, "NEXT_PAGE") == 0 || strcmp(label, "NEXT PAGE") == 0) {
+        if (d->current_page == 2) {
+            /* LEGS page: scroll waypoints forward (wrap around) */
+            FlightPlan* fp = d->fmc ? &d->fmc->flight_plan : NULL;
+            if (fp && fp->waypoint_count > 5) {
+                int max_scroll = fp->waypoint_count - 5;
+                if (d->legs_scroll < max_scroll) {
+                    d->legs_scroll += 5;
+                    if (d->legs_scroll > max_scroll) d->legs_scroll = max_scroll;
+                } else {
+                    d->legs_scroll = 0;  /* wrap to beginning */
+                }
+            }
+            return 1;
+        }
+        if (d->current_page == 6 && d->dep_state != 0) {
+            /* DEP/ARR page: scroll list forward */
+            d->dep_scroll += 5;
+            /* Clamped by display logic; allow overshoot and clamp in build */
+            return 1;
+        }
         d->current_page = (d->current_page + 1) % 10;  /* cycle forward */
         d->legs_scroll = 0;
         return 1;
@@ -1800,6 +1997,8 @@ static void fmc_on_init(Instrument* self, App* app)
     d->current_page   = 0;
     d->legs_scroll    = 0;
     d->message_scroll = 0;
+    d->dep_state      = 0;
+    d->dep_scroll     = 0;
     d->hovered_button = -1;
     d->clicked_button = -1;
     d->click_time     = 0;
@@ -1926,11 +2125,66 @@ static void fmc_on_render(Instrument* self, SDL_Renderer* renderer)
             y -= (int)(line_h * 0.65f); // Header line should be closer to its own data line
         }
 
-        /* Display text (monospaced, left-aligned for column alignment) */
         set_col(renderer, COL_WHITE);
         float font_scale = is_data ? 0.55f : 0.45f; // Header is slightly smaller
-        font_draw_scaled_aligned(renderer, screen_left, y, d->display[ln],
-                                 font_scale, FONT_MONO, FONT_ALIGN_LEFT);
+
+        /* Find natural column split: widest whitespace gap (≥2 spaces)
+         * that separates non-space content on both sides */
+        int split_at = -1;
+        int best_gap = 0;
+        for (int ci = 0; ci < 24; ci++) {
+            if (d->display[ln][ci] != ' ') continue;
+            int cj = ci;
+            while (cj < 24 && d->display[ln][cj] == ' ') cj++;
+            int gap_len = cj - ci;
+            if (gap_len >= 2 && gap_len > best_gap) {
+                /* Check content on both sides of this gap */
+                int left_has = 0, right_has = 0;
+                for (int k = 0; k < ci; k++)
+                    if (d->display[ln][k] != ' ') { left_has = 1; break; }
+                for (int k = cj; k < 24; k++)
+                    if (d->display[ln][k] != ' ') { right_has = 1; break; }
+                if (left_has && right_has) {
+                    best_gap = gap_len;
+                    split_at = ci;
+                }
+            }
+            ci = cj;
+        }
+
+        int left_x  = rect->x + (int)(rect->w * 0.16f);
+        int right_x = rect->x + (int)(rect->w * 0.84f);
+
+        if (split_at >= 0) {
+            /* Two-column line: extract left and right parts, trim whitespace */
+            char left_col[25];
+            memcpy(left_col, d->display[ln], split_at);
+            left_col[split_at] = '\0';
+            int tl = split_at;
+            while (tl > 0 && left_col[tl - 1] == ' ') left_col[--tl] = '\0';
+
+            int rs = split_at;
+            while (rs < 24 && d->display[ln][rs] == ' ') rs++;
+            char right_col[25];
+            int rlen = 24 - rs;
+            if (rlen > 0) {
+                memcpy(right_col, d->display[ln] + rs, rlen);
+                right_col[rlen] = '\0';
+                while (rlen > 0 && right_col[rlen - 1] == ' ') right_col[--rlen] = '\0';
+            } else {
+                right_col[0] = '\0';
+            }
+
+            font_draw_scaled_aligned(renderer, left_x, y, left_col,
+                                     font_scale, FONT_MONO, FONT_ALIGN_LEFT);
+            if (right_col[0])
+                font_draw_scaled_aligned(renderer, right_x, y, right_col,
+                                         font_scale, FONT_MONO, FONT_ALIGN_RIGHT);
+        } else {
+            /* Single-column line: left-aligned at 0.16 */
+            font_draw_scaled_aligned(renderer, left_x, y, d->display[ln],
+                                     font_scale, FONT_MONO, FONT_ALIGN_LEFT);
+        }
     }
 
     /* Scratchpad content */
@@ -2078,13 +2332,16 @@ static int fmc_on_event(Instrument* self, const SDL_Event* ev)
     if (ev->type == SDL_KEYDOWN) {
         SDL_Keycode key = ev->key.keysym.sym;
 
-        /* Page navigation (F1-F5) */
+        /* Page navigation (F1-F10) */
         if (key == SDLK_F1) { d->current_page = 0; d->legs_scroll = 0; return 1; }
         if (key == SDLK_F2) { d->current_page = 1; d->legs_scroll = 0; return 1; }
         if (key == SDLK_F3) { d->current_page = 2; return 1; }
         if (key == SDLK_F4) { d->current_page = 3; return 1; }
         if (key == SDLK_F5) { d->current_page = 4; return 1; }
         if (key == SDLK_F7) { d->current_page = 5; return 1; }
+        if (key == SDLK_F8) { d->current_page = 7; return 1; }  /* CLB */
+        if (key == SDLK_F9) { d->current_page = 8; return 1; }  /* CRZ */
+        if (key == SDLK_F10) { d->current_page = 9; return 1; } /* DES */
 
         /* F6 = toggle LEGS sort mode */
         if (key == SDLK_F6) {
@@ -2095,9 +2352,9 @@ static int fmc_on_event(Instrument* self, const SDL_Event* ev)
             return 1;
         }
 
-        /* Tab = cycle pages forward */
+        /* Tab = cycle pages forward (all 10) */
         if (key == SDLK_TAB) {
-            d->current_page = (d->current_page + 1) % 6;
+            d->current_page = (d->current_page + 1) % 10;
             d->legs_scroll  = 0;
             return 1;
         }
@@ -2105,16 +2362,18 @@ static int fmc_on_event(Instrument* self, const SDL_Event* ev)
         /* Page Up/Down for LEGS scrolling (page 2 only) */
         if (key == SDLK_PAGEDOWN && d->current_page == 2) {
             FlightPlan* fp = d->fmc ? &d->fmc->flight_plan : NULL;
-            if (fp && fp->waypoint_count > 10) {
-                d->legs_scroll += 10;
-                if (d->legs_scroll >= fp->waypoint_count)
-                    d->legs_scroll = fp->waypoint_count - 10;
-                if (d->legs_scroll < 0) d->legs_scroll = 0;
+            if (fp && fp->waypoint_count > 5) {
+                int max_scroll = fp->waypoint_count - 5;
+                if (d->legs_scroll < max_scroll) {
+                    d->legs_scroll += 5;
+                    if (d->legs_scroll > max_scroll)
+                        d->legs_scroll = max_scroll;
+                }
             }
             return 1;
         }
         if (key == SDLK_PAGEUP && d->current_page == 2) {
-            d->legs_scroll -= 10;
+            d->legs_scroll -= 5;
             if (d->legs_scroll < 0) d->legs_scroll = 0;
             return 1;
         }

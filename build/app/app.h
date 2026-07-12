@@ -27,6 +27,7 @@ typedef struct AlertSystem AlertSystem;
 typedef struct UDPSocket   UDPSocket;
 typedef struct MapDisplay  MapDisplay;
 typedef struct AIAdvisor   AIAdvisor;
+typedef struct DepartureDB  DepartureDB;
 
 /**
  * @brief Top-level application state.
@@ -71,6 +72,9 @@ typedef struct App {
 
     /* FMC shared state (accessible by FMC instrument and data layer) */
     FMCState*      fmc_state;
+
+    /* Departure procedure database (SID/runway/transition) */
+    DepartureDB*   dep_db;
 
     /* GPWS audio alert system */
     AlertSystem*   alert_sys;

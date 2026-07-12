@@ -140,6 +140,7 @@ typedef struct {
     float         climb_tgt_spd_kts;
     float         climb_spd_rest_kts;
     float         climb_spd_rest_alt_ft;
+    float         transition_altitude_ft;   /* Transition altitude (ft), default 18000 */
 
     /* Cruise parameters */
     float         cruise_tgt_spd_mach;
@@ -150,6 +151,7 @@ typedef struct {
     float         descent_spd_rest_kts;
     float         descent_spd_rest_alt_ft;
     float         descent_ed_alt_ft;
+    float         descent_angle_deg;        /* Descent angle (degrees), default 3.0 */
 
     /* Route statistics (computed) */
     float         total_distance_nm;

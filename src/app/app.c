@@ -21,6 +21,7 @@
 #include "EICAS/eicas2.h"
 #include "data/flight_data.h"
 #include "data/navdata.h"
+#include "data/departure_db.h"
 #include "ds/spatial_hash.h"
 #include "net/udp.h"
 #include "net/xplane.h"
@@ -1032,6 +1033,16 @@ int app_run_with_config(const char* config_path)
                 app->fmc_state->spatial_hash->total_entries : 0);
     }
 
+    /* 6b. Load departure procedure database */
+    {
+        app->dep_db = calloc(1, sizeof(DepartureDB));
+        if (app->dep_db) {
+            dep_db_load(app->dep_db, "assets/assets/fmc_data.txt");
+            fprintf(stderr, "[STARTUP] Departure DB: %d airports loaded\n",
+                    app->dep_db->count);
+        }
+    }
+
     /* 7. Create instruments */
     fprintf(stderr, "[STARTUP] 6/7 Creating instruments...\n");
     if (create_instruments(app) <= 0) {
@@ -1147,6 +1158,10 @@ cleanup:
     destroy_instruments(app);
 
     /* Free FMC state */
+    if (app->dep_db) {
+        free(app->dep_db);
+        app->dep_db = NULL;
+    }
     if (app->fmc_state) {
         fmc_state_free(app->fmc_state);
         app->fmc_state = NULL;

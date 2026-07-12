@@ -1,0 +1,119 @@
+# =============================================================================
+# FMC 离场程序数据 — 提取自 fmc_data.c（旧版硬编码数据）
+# =============================================================================
+# 包含 4 个机场的跑道、离场程序(SID)、过渡点及其关联关系
+# 格式说明：
+#   AIRPORT <ICAO>               — 机场
+#   RWY    <标识>                 — 跑道
+#   SID    <名称>                 — 离场程序
+#   WPT    <标识>                 — 航路点/过渡点
+#   LINK   <元素A> -> <元素B>     — 关联关系
+# =============================================================================
+
+# ========================================
+# KSEA — Seattle-Tacoma International
+# ========================================
+AIRPORT KSEA
+RWY     RW16C
+RWY     RW16L
+RWY     RW34C
+SID     ATOM E2
+SID     BANGR 9
+SID     SUMMA 1
+WPT     COV
+WPT     HBM
+WPT     XYZ
+
+# 跑道 → 离场程序
+LINK    RW16C -> ATOM E2
+LINK    RW16C -> SUMMA 1
+LINK    RW16L -> BANGR 9
+LINK    RW34C -> SUMMA 1
+
+# 跑道 → 过渡点
+LINK    RW16C -> COV
+LINK    RW16C -> HBM
+LINK    RW34C -> XYZ
+
+# 离场程序 → 过渡点
+LINK    ATOM E2 -> COV
+LINK    SUMMA 1 -> HBM
+
+# ========================================
+# KBFI — Boeing Field / King County Intl
+# ========================================
+AIRPORT KBFI
+RWY     RW14R
+RWY     RW14L
+RWY     RW32L
+RWY     RW32R
+SID     CHINS 3
+SID     EPH 8
+SID     HAROB 4
+SID     JAKSN 5
+SID     PAINE 2
+SID     SUMMA 6
+
+# 跑道 → 离场程序
+LINK    RW14R -> CHINS 3
+LINK    RW14R -> HAROB 4
+LINK    RW14L -> EPH 8
+LINK    RW14L -> JAKSN 5
+LINK    RW32L -> CHINS 3
+LINK    RW32L -> PAINE 2
+LINK    RW32R -> EPH 8
+LINK    RW32R -> SUMMA 6
+
+# ========================================
+# ZUUU — 成都双流国际机场
+# ========================================
+AIRPORT ZUUU
+RWY     RW02L
+RWY     RW02R
+RWY     RW20L
+RWY     RW20R
+SID     CTU 1X
+SID     GORGY 1X
+SID     POMOK 1X
+SID     ROBIG 1X
+SID     XARPI 1X
+SID     ZYU 1X
+
+# 跑道 → 离场程序
+LINK    RW02L -> CTU 1X
+LINK    RW02L -> GORGY 1X
+LINK    RW02R -> POMOK 1X
+LINK    RW02R -> ROBIG 1X
+LINK    RW20L -> CTU 1X
+LINK    RW20L -> XARPI 1X
+LINK    RW20R -> POMOK 1X
+LINK    RW20R -> ZYU 1X
+
+# ========================================
+# ZUCK — 重庆江北国际机场
+# ========================================
+AIRPORT ZUCK
+RWY     RW02
+RWY     RW03
+RWY     RW20
+RWY     RW21
+SID     CKG 1X
+SID     DUGUB 1X
+SID     GOVSA 1X
+SID     IDLUN 1X
+SID     MEKNO 1X
+SID     NILOM 1X
+
+# 跑道 → 离场程序
+LINK    RW02 -> CKG 1X
+LINK    RW02 -> DUGUB 1X
+LINK    RW02 -> GOVSA 1X
+LINK    RW03 -> GOVSA 1X
+LINK    RW03 -> IDLUN 1X
+LINK    RW03 -> MEKNO 1X
+LINK    RW20 -> CKG 1X
+LINK    RW20 -> DUGUB 1X
+LINK    RW20 -> MEKNO 1X
+LINK    RW21 -> GOVSA 1X
+LINK    RW21 -> IDLUN 1X
+LINK    RW21 -> NILOM 1X

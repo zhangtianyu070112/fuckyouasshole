@@ -686,7 +686,8 @@ void flight_plan_clear(FlightPlan* plan)
     plan->climb_tgt_spd_kts = 280.0f;
     plan->climb_spd_rest_kts = 250.0f;
     plan->climb_spd_rest_alt_ft = 10000.0f;
-    
+    plan->transition_altitude_ft = 18000.0f;
+
     plan->cruise_tgt_spd_mach = 0.78f;
     
     plan->descent_tgt_spd_mach = 0.78f;
@@ -694,6 +695,7 @@ void flight_plan_clear(FlightPlan* plan)
     plan->descent_spd_rest_kts = 250.0f;
     plan->descent_spd_rest_alt_ft = 10000.0f;
     plan->descent_ed_alt_ft = 10000.0f;
+    plan->descent_angle_deg = 3.0f;
 
     /* FMCState::plan_modified must be set by the caller */
 }
@@ -743,6 +745,8 @@ int flight_plan_save(const FlightPlan* plan, const char* path)
     fprintf(fp, "arrival=%s\n", plan->arrival.icao);
     fprintf(fp, "cruise_alt=%f\n", (double)plan->cruise_altitude_ft);
     fprintf(fp, "cruise_spd=%f\n", (double)plan->cruise_speed_kts);
+    fprintf(fp, "transition_alt=%f\n", (double)plan->transition_altitude_ft);
+    fprintf(fp, "descent_angle=%f\n", (double)plan->descent_angle_deg);
     fprintf(fp, "waypoint_count=%d\n", plan->waypoint_count);
 
     for (int i = 0; i < plan->waypoint_count; i++) {
@@ -793,6 +797,10 @@ int flight_plan_load(FlightPlan* plan, const char* path)
                 plan->cruise_altitude_ft = (float)atof(val);
             } else if (strcmp(key, "cruise_spd") == 0) {
                 plan->cruise_speed_kts = (float)atof(val);
+            } else if (strcmp(key, "transition_alt") == 0) {
+                plan->transition_altitude_ft = (float)atof(val);
+            } else if (strcmp(key, "descent_angle") == 0) {
+                plan->descent_angle_deg = (float)atof(val);
             } else if (strcmp(key, "waypoint_count") == 0) {
                 /* Read the specified number of waypoints */
                 int count = atoi(val);
