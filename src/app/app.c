@@ -1045,17 +1045,18 @@ static int instrument_event_bridge(const SDL_Event* event, void* userdata)
 
     /* =====================================================================
      *  ZOOM-BUTTON CLICK DETECTION
+     *
+     *  Button rects live in scene (window) coordinates.  When the camera
+     *  is zoomed we project each rect forward into screen space and hit-test
+     *  against the raw screen-space click — this avoids the floating-point
+     *  division that a screen→scene inverse transform would require.
      * ===================================================================== */
 
     if (event->type == SDL_MOUSEBUTTONDOWN) {
         int mx = event->button.x;
         int my = event->button.y;
-
-        /* When camera is zoomed, convert screen → scene coordinates so
-         * button-hit tests against instrument_base_rects stay correct. */
-        if (app->zoomed_instrument_index < 0) {
-            screen_to_scene(app, mx, my, &mx, &my);
-        }
+        int camera_active = (app->zoomed_instrument_index < 0 &&
+                             app->cam_zoom > 1.0f);
 
         /* Check zoom buttons first */
         for (int i = 0; i < app->instrument_count; i++) {
@@ -1080,13 +1081,22 @@ static int instrument_event_bridge(const SDL_Event* event, void* userdata)
 
             int btn_size = (app->zoomed_instrument_index == i) ? 32 : (phys.w * 32 / 772);
             if (btn_size < 16) btn_size = 16;
-            
+
+            /* Build button rect in scene coordinates */
             SDL_Rect btn_rect = {
                 phys.x + phys.w - btn_size - 4,
                 phys.y + 4,
                 btn_size,
                 btn_size
             };
+
+            /* Project to screen space when camera is zoomed */
+            if (camera_active) {
+                btn_rect.x = (int)(((float)btn_rect.x - app->cam_offset_x) * app->cam_zoom);
+                btn_rect.y = (int)(((float)btn_rect.y - app->cam_offset_y) * app->cam_zoom);
+                btn_rect.w = (int)((float)btn_rect.w * app->cam_zoom);
+                btn_rect.h = (int)((float)btn_rect.h * app->cam_zoom);
+            }
 
             if (mx >= btn_rect.x && mx <= btn_rect.x + btn_rect.w &&
                 my >= btn_rect.y && my <= btn_rect.y + btn_rect.h) {

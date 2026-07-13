@@ -90,13 +90,13 @@ static void draw_nd_top_bar(SDL_Renderer* r, const SDL_Rect* rect, NDData* nd,
 {
     int y0 = rect->y + 4;
 
-    /* === Center: TRK | MAG (Above radar triangle) === */
-    int cx = rect->x + rect->w * 56 / 100;
-    int cy = rect->y + rect->h * 48 / 100;
-    int radius = (int)((float)(rect->h < rect->w ? rect->h : rect->w) * 0.38f);
-    if (radius < 40) radius = 40;
+    /* === Center: TRK | MAG (above compass, fixed position) === */
+    int cx = rect->x + rect->w * 50 / 100;
+    int cy = rect->y + rect->h * 55 / 100;                    /* moved down */
+    int radius = (int)((float)(rect->h < rect->w ? rect->h : rect->w) * 0.45f);
+    if (radius < 50) radius = 50;
 
-    int top_y = cy - radius - 40; /* Positioned right above the triangle base */
+    int top_y = rect->y + rect->h * 5 / 100;  /* fixed, independent of compass */
 
     float track = nd->track_valid ? nd->track_mag_deg : f->heading_mag_deg;
     /* When GS < 30 kt (near-stationary), track is unreliable — fall back to heading */
@@ -409,10 +409,10 @@ static void draw_route_overlay(SDL_Renderer* r, const SDL_Rect* rect, NDData* nd
 static void draw_vor_mode(SDL_Renderer* r, const SDL_Rect* rect, NDData* nd,
                           const FlightDataValues* f)
 {
-    int cx   = rect->x + rect->w * 56 / 100;
-    int cy   = rect->y + rect->h * 48 / 100;
-    int radius = (int)((float)(rect->h < rect->w ? rect->h : rect->w) * 0.38f);
-    if (radius < 40) radius = 40;
+    int cx   = rect->x + rect->w * 50 / 100;
+    int cy   = rect->y + rect->h * 55 / 100;
+    int radius = (int)((float)(rect->h < rect->w ? rect->h : rect->w) * 0.45f);
+    if (radius < 50) radius = 50;
 
     float hdg = f->heading_mag_deg;
     float px_nm = (float)radius / (float)nd->range_nm;
@@ -581,10 +581,10 @@ static void draw_vor_mode(SDL_Renderer* r, const SDL_Rect* rect, NDData* nd,
 static void draw_map_mode(SDL_Renderer* r, const SDL_Rect* rect, NDData* nd,
                           const FlightDataValues* f)
 {
-    int cx   = rect->x + rect->w * 56 / 100;  /* Offset left slightly */
-    int cy   = rect->y + rect->h * 48 / 100;
-    int radius = (int)((float)(rect->h < rect->w ? rect->h : rect->w) * 0.38f);
-    if (radius < 40) radius = 40;
+    int cx   = rect->x + rect->w * 50 / 100;  /* Centered horizontally */
+    int cy   = rect->y + rect->h * 55 / 100;
+    int radius = (int)((float)(rect->h < rect->w ? rect->h : rect->w) * 0.45f);
+    if (radius < 50) radius = 50;
 
     float hdg = f->heading_mag_deg;
 
