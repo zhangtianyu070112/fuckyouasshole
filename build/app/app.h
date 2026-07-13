@@ -65,6 +65,18 @@ typedef struct App {
     SDL_Texture*   btn_full_screen;
     SDL_Texture*   btn_sub;
 
+    /* Camera zoom/pan — active only when no instrument is fullscreened */
+    float          cam_zoom;
+    float          cam_quality;     /* internal render scale for scene_texture */
+    float          cam_offset_x;
+    float          cam_offset_y;
+    int            cam_dragging;
+    int            cam_drag_start_x;
+    int            cam_drag_start_y;
+    float          cam_drag_offset_x;
+    float          cam_drag_offset_y;
+    SDL_Texture*   scene_texture;
+
     /* Network / data source threads */
     Thread*        udp_thread;
     Thread*        mock_thread;

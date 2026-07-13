@@ -54,6 +54,63 @@ extern void        fmc_state_free(FMCState* state);
  * @brief Initialize SDL2 and its extension libraries.
  * @return 0 on success, -1 on failure.
  */
+#define CAM_ZOOM_MIN  1.0f
+#define CAM_ZOOM_MAX  5.0f
+#define CAM_ZOOM_STEP 0.15f
+
+/* =========================================================================
+ *  Camera helpers
+ * ========================================================================= */
+
+/**
+ * @brief (Re)create the scene render-target texture.
+ *
+ * @param quality  Internal render scale (≥1.0).  Texture size =
+ *                 screen_w×quality × screen_h×quality, capped at 3×.
+ */
+static void ensure_scene_texture(App* app, float quality)
+{
+    if (quality < 1.0f) quality = 1.0f;
+    if (quality > 3.0f) quality = 3.0f;
+
+    int tex_w = (int)((float)app->screen_w * quality);
+    int tex_h = (int)((float)app->screen_h * quality);
+
+    if (app->scene_texture) {
+        int tw, th;
+        SDL_QueryTexture(app->scene_texture, NULL, NULL, &tw, &th);
+        if (tw == tex_w && th == tex_h) return;
+        SDL_DestroyTexture(app->scene_texture);
+        app->scene_texture = NULL;
+    }
+    app->scene_texture = SDL_CreateTexture(app->renderer,
+        SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, tex_w, tex_h);
+    if (app->scene_texture) {
+        app->cam_quality = quality;
+    } else {
+        LOG_WARN("Failed to create scene texture for camera zoom");
+        app->cam_quality = 1.0f;
+    }
+}
+
+/**
+ * @brief Convert screen-space mouse coordinates to scene-space.
+ *
+ * When the camera is zoomed, the mouse position in screen pixels must be
+ * mapped back to where it falls inside the (un-zoomed) scene texture.
+ */
+static void screen_to_scene(const App* app, int scr_x, int scr_y,
+                            int* out_x, int* out_y)
+{
+    if (app->cam_zoom > 1.0f && app->zoomed_instrument_index < 0) {
+        *out_x = (int)(app->cam_offset_x + (float)scr_x / app->cam_zoom);
+        *out_y = (int)(app->cam_offset_y + (float)scr_y / app->cam_zoom);
+    } else {
+        *out_x = scr_x;
+        *out_y = scr_y;
+    }
+}
+
 static int init_sdl(App* app)
 {
     Uint32 flags = SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER | SDL_INIT_AUDIO;
@@ -211,9 +268,21 @@ static void layout_instruments(App* app)
         app->instruments[i]->rect.h = native_h;
         app->instruments[i]->rect.x = 0;
         app->instruments[i]->rect.y = 0;
-        
-        if (!app->instrument_targets[i]) {
-            app->instrument_targets[i] = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, native_w, native_h);
+
+        /* Recreate instrument texture if size doesn't match (handles stale
+         * textures from previous runs or resolution changes) */
+        {
+            int need_create = 1;
+            if (app->instrument_targets[i]) {
+                int tw, th;
+                SDL_QueryTexture(app->instrument_targets[i], NULL, NULL, &tw, &th);
+                if (tw == native_w && th == native_h) need_create = 0;
+                else { SDL_DestroyTexture(app->instrument_targets[i]); app->instrument_targets[i] = NULL; }
+            }
+            if (need_create) {
+                app->instrument_targets[i] = SDL_CreateTexture(app->renderer,
+                    SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, native_w, native_h);
+            }
             if (app->instrument_targets[i]) {
                 SDL_SetTextureBlendMode(app->instrument_targets[i], SDL_BLENDMODE_BLEND);
             } else {
@@ -598,6 +667,12 @@ static void main_loop(App* app)
             app->screen_w = w;
             app->screen_h = h;
             layout_instruments(app);
+            ensure_scene_texture(app, 1.0f);
+            /* Reset camera on resize — offsets no longer valid at new size */
+            app->cam_zoom     = 1.0f;
+            app->cam_offset_x = 0.0f;
+            app->cam_offset_y = 0.0f;
+            app->cam_dragging = 0;
         }
 
         /* 3. Read shared flight data (lock briefly) */
@@ -629,6 +704,30 @@ static void main_loop(App* app)
             }
         }
         /* 5. Render */
+        int use_scene = (app->cam_zoom > 1.0f &&
+                         app->zoomed_instrument_index < 0 &&
+                         app->scene_texture);
+
+        /* Prepare scene_texture at quality resolution when camera zoomed */
+        float quality = 1.0f;
+        if (use_scene) {
+            quality = app->cam_zoom;
+            ensure_scene_texture(app, quality);
+            /* Re-check: ensure_scene_texture may have failed */
+            if (app->scene_texture) {
+                quality = app->cam_quality;
+                SDL_RenderSetScale(app->renderer, quality, quality);
+                SDL_SetRenderTarget(app->renderer, app->scene_texture);
+            } else {
+                use_scene = 0;   /* fall back to direct rendering */
+                SDL_RenderSetScale(app->renderer, 1.0f, 1.0f);
+            }
+        } else {
+            /* Always reset scale to 1× for direct-to-screen rendering */
+            SDL_RenderSetScale(app->renderer, 1.0f, 1.0f);
+        }
+        SDL_Texture* main_target = use_scene ? app->scene_texture : NULL;
+
         SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 255);
         SDL_RenderClear(app->renderer);
 
@@ -707,6 +806,11 @@ static void main_loop(App* app)
             if (inst && inst->on_render && app->instrument_targets[i]) {
                 SDL_Rect phys = app->instrument_base_rects[i];
 
+                /* Save render-scale, reset to 1× for native-res rendering */
+                float save_sx = 1.0f, save_sy = 1.0f;
+                SDL_RenderGetScale(app->renderer, &save_sx, &save_sy);
+                SDL_RenderSetScale(app->renderer, 1.0f, 1.0f);
+
                 /* Render instrument to its target texture at native 772x721 */
                 SDL_SetRenderTarget(app->renderer, app->instrument_targets[i]);
                 SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 255);
@@ -714,8 +818,9 @@ static void main_loop(App* app)
                 inst->on_render(inst, app->renderer);
                 inst->needs_redraw = 0;
 
-                /* Restore default render target and copy scaled texture */
-                SDL_SetRenderTarget(app->renderer, NULL);
+                /* Restore render target and quality scale, then copy */
+                SDL_SetRenderTarget(app->renderer, main_target);
+                SDL_RenderSetScale(app->renderer, save_sx, save_sy);
                 SDL_RenderCopy(app->renderer, app->instrument_targets[i], NULL, &phys);
             }
         }
@@ -744,6 +849,11 @@ static void main_loop(App* app)
                 phys.x = (app->screen_w - native_w) / 2;
                 phys.y = (app->screen_h - native_h) / 2;
 
+                /* Save render-scale, reset to 1× for native-res rendering */
+                float save_sx_z = 1.0f, save_sy_z = 1.0f;
+                SDL_RenderGetScale(app->renderer, &save_sx_z, &save_sy_z);
+                SDL_RenderSetScale(app->renderer, 1.0f, 1.0f);
+
                 /* Render instrument to its target texture at native resolution */
                 SDL_SetRenderTarget(app->renderer, app->instrument_targets[app->zoomed_instrument_index]);
                 SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 255);
@@ -751,8 +861,9 @@ static void main_loop(App* app)
                 inst->on_render(inst, app->renderer);
                 inst->needs_redraw = 0;
 
-                /* Restore default render target and copy texture */
-                SDL_SetRenderTarget(app->renderer, NULL);
+                /* Restore render target, quality scale, and copy texture */
+                SDL_SetRenderTarget(app->renderer, main_target);
+                SDL_RenderSetScale(app->renderer, save_sx_z, save_sy_z);
                 SDL_RenderCopy(app->renderer, app->instrument_targets[app->zoomed_instrument_index], NULL, &phys);
             }
         }
@@ -798,6 +909,24 @@ static void main_loop(App* app)
             }
         }
 
+        /* --- Camera: blit scene texture → screen with zoom/pan transform --- */
+        if (use_scene) {
+            /* Reset to screen rendering at native 1× scale */
+            SDL_RenderSetScale(app->renderer, 1.0f, 1.0f);
+            SDL_SetRenderTarget(app->renderer, NULL);
+            SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 255);
+            SDL_RenderClear(app->renderer);
+
+            /* src_rect must be in the texture's physical pixels (quality-scaled) */
+            SDL_Rect src_rect;
+            src_rect.x = (int)(app->cam_offset_x * quality);
+            src_rect.y = (int)(app->cam_offset_y * quality);
+            src_rect.w = (int)((float)app->screen_w / app->cam_zoom * quality);
+            src_rect.h = (int)((float)app->screen_h / app->cam_zoom * quality);
+            SDL_Rect dst_rect = {0, 0, app->screen_w, app->screen_h};
+            SDL_RenderCopy(app->renderer, app->scene_texture, &src_rect, &dst_rect);
+        }
+
         SDL_RenderPresent(app->renderer);
 
         /* 6. Frame rate cap */
@@ -839,9 +968,95 @@ static int instrument_event_bridge(const SDL_Event* event, void* userdata)
 
     App* app = (App*)userdata;
 
+    /* =====================================================================
+     *  CAMERA ZOOM / PAN  (only when no instrument is zoomed fullscreen)
+     * ===================================================================== */
+
+    if (app->zoomed_instrument_index < 0) {
+
+        /* --- Mouse wheel → zoom centered on cursor --- */
+        if (event->type == SDL_MOUSEWHEEL) {
+            int mx, my;
+            SDL_GetMouseState(&mx, &my);
+
+            float old_zoom = app->cam_zoom;
+            float step     = (float)event->wheel.y * CAM_ZOOM_STEP;
+            float new_zoom = old_zoom * (1.0f + step);
+            if (new_zoom < CAM_ZOOM_MIN) new_zoom = CAM_ZOOM_MIN;
+            if (new_zoom > CAM_ZOOM_MAX) new_zoom = CAM_ZOOM_MAX;
+
+            /* Keep the scene point under the cursor stationary */
+            float scene_x = app->cam_offset_x + (float)mx / old_zoom;
+            float scene_y = app->cam_offset_y + (float)my / old_zoom;
+            app->cam_offset_x = scene_x - (float)mx / new_zoom;
+            app->cam_offset_y = scene_y - (float)my / new_zoom;
+            app->cam_zoom     = new_zoom;
+
+            /* Clamp to scene bounds */
+            float max_ox = (float)app->screen_w - (float)app->screen_w / new_zoom;
+            float max_oy = (float)app->screen_h - (float)app->screen_h / new_zoom;
+            if (app->cam_offset_x < 0.0f)     app->cam_offset_x = 0.0f;
+            if (app->cam_offset_x > max_ox)   app->cam_offset_x = max_ox;
+            if (app->cam_offset_y < 0.0f)     app->cam_offset_y = 0.0f;
+            if (app->cam_offset_y > max_oy)   app->cam_offset_y = max_oy;
+
+            /* Reset pan when back to 1.0× */
+            if (new_zoom <= 1.0f) {
+                app->cam_offset_x = 0.0f;
+                app->cam_offset_y = 0.0f;
+            }
+            return 1; /* consumed */
+        }
+
+        /* --- Right mouse button → begin pan (only when zoomed in) --- */
+        if (event->type == SDL_MOUSEBUTTONDOWN &&
+            event->button.button == SDL_BUTTON_RIGHT &&
+            app->cam_zoom > 1.0f) {
+            app->cam_dragging      = 1;
+            app->cam_drag_start_x  = event->button.x;
+            app->cam_drag_start_y  = event->button.y;
+            app->cam_drag_offset_x = app->cam_offset_x;
+            app->cam_drag_offset_y = app->cam_offset_y;
+            return 1;
+        }
+
+        if (event->type == SDL_MOUSEBUTTONUP &&
+            event->button.button == SDL_BUTTON_RIGHT) {
+            app->cam_dragging = 0;
+            if (app->cam_zoom > 1.0f) return 1;
+        }
+
+        /* --- Mouse motion → pan when dragging --- */
+        if (event->type == SDL_MOUSEMOTION && app->cam_dragging) {
+            float dx = (float)(event->motion.x - app->cam_drag_start_x);
+            float dy = (float)(event->motion.y - app->cam_drag_start_y);
+            app->cam_offset_x = app->cam_drag_offset_x - dx / app->cam_zoom;
+            app->cam_offset_y = app->cam_drag_offset_y - dy / app->cam_zoom;
+
+            float max_ox = (float)app->screen_w - (float)app->screen_w / app->cam_zoom;
+            float max_oy = (float)app->screen_h - (float)app->screen_h / app->cam_zoom;
+            if (app->cam_offset_x < 0.0f)     app->cam_offset_x = 0.0f;
+            if (app->cam_offset_x > max_ox)   app->cam_offset_x = max_ox;
+            if (app->cam_offset_y < 0.0f)     app->cam_offset_y = 0.0f;
+            if (app->cam_offset_y > max_oy)   app->cam_offset_y = max_oy;
+            return 1;
+        }
+    }
+
+    /* =====================================================================
+     *  ZOOM-BUTTON CLICK DETECTION
+     * ===================================================================== */
+
     if (event->type == SDL_MOUSEBUTTONDOWN) {
         int mx = event->button.x;
         int my = event->button.y;
+
+        /* When camera is zoomed, convert screen → scene coordinates so
+         * button-hit tests against instrument_base_rects stay correct. */
+        if (app->zoomed_instrument_index < 0) {
+            screen_to_scene(app, mx, my, &mx, &my);
+        }
+
         /* Check zoom buttons first */
         for (int i = 0; i < app->instrument_count; i++) {
             Instrument* inst = app->instruments[i];
@@ -879,6 +1094,11 @@ static int instrument_event_bridge(const SDL_Event* event, void* userdata)
                     app->zoomed_instrument_index = -1; /* zoom out */
                 } else {
                     app->zoomed_instrument_index = i; /* zoom in */
+                    /* Reset camera when entering instrument fullscreen */
+                    app->cam_zoom     = 1.0f;
+                    app->cam_offset_x = 0.0f;
+                    app->cam_offset_y = 0.0f;
+                    app->cam_dragging = 0;
                 }
                 layout_instruments(app); /* reapply layout */
                 return 1; /* consumed */
@@ -929,6 +1149,14 @@ static int instrument_event_bridge(const SDL_Event* event, void* userdata)
                 if (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_MOUSEBUTTONUP || event->type == SDL_MOUSEMOTION) {
                     SDL_Rect phys = app->instrument_base_rects[i];
 
+                    /* Convert screen coords → scene coords when camera zoomed */
+                    int ev_x, ev_y;
+                    if (event->type == SDL_MOUSEMOTION) {
+                        screen_to_scene(app, event->motion.x, event->motion.y, &ev_x, &ev_y);
+                    } else {
+                        screen_to_scene(app, event->button.x, event->button.y, &ev_x, &ev_y);
+                    }
+
                     int native_w = 772;
                     int native_h = 721;
                     if (inst->name && strstr(inst->name, "FMC")) {
@@ -940,11 +1168,11 @@ static int instrument_event_bridge(const SDL_Event* event, void* userdata)
                     float scale_y = (float)native_h / (float)phys.h;
 
                     if (event->type == SDL_MOUSEMOTION) {
-                        local_event.motion.x = (Sint32)((event->motion.x - phys.x) * scale_x);
-                        local_event.motion.y = (Sint32)((event->motion.y - phys.y) * scale_y);
+                        local_event.motion.x = (Sint32)((ev_x - phys.x) * scale_x);
+                        local_event.motion.y = (Sint32)((ev_y - phys.y) * scale_y);
                     } else {
-                        local_event.button.x = (Sint32)((event->button.x - phys.x) * scale_x);
-                        local_event.button.y = (Sint32)((event->button.y - phys.y) * scale_y);
+                        local_event.button.x = (Sint32)((ev_x - phys.x) * scale_x);
+                        local_event.button.y = (Sint32)((ev_y - phys.y) * scale_y);
                     }
                 }
                 int consumed = inst->on_event(inst, &local_event);
@@ -969,6 +1197,7 @@ int app_run_with_config(const char* config_path)
 
     /* Zero-initialize everything for safe cleanup */
     memset(app, 0, sizeof(App));
+    app->cam_zoom = 1.0f;
 
     /* 1. Load config */
     app->config = config_load(config_path);
@@ -1049,6 +1278,7 @@ int app_run_with_config(const char* config_path)
         LOG_WARN("No instruments created — running with empty window");
     }
     layout_instruments(app);
+    ensure_scene_texture(app, 1.0f);
     init_instruments(app);
 
     /* Register instrument event bridge — routes events to instruments.
@@ -1180,6 +1410,10 @@ cleanup:
     }
 
     /* SDL cleanup */
+    if (app->scene_texture) {
+        SDL_DestroyTexture(app->scene_texture);
+        app->scene_texture = NULL;
+    }
     if (app->renderer) {
         SDL_DestroyRenderer(app->renderer);
         app->renderer = NULL;

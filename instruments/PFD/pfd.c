@@ -197,12 +197,16 @@ static void draw_attitude_indicator(SDL_Renderer* r, const PFDLayout* lay,
     float horizon_offset = pitch * scale;
     horizon_offset = clamp_f(horizon_offset, -(float)R * 0.92f, (float)R * 0.92f);
 
-    /* ---- Sky/ground background (matches horizon line exactly) ----
+    /* Corner radius for rounded-square mask */
+    float cr = (float)R * 0.2f;
+    float cr2 = cr * cr;
+    int   flat_h = R - (int)cr;  /* half-height of the flat side region */
+
+    /* ---- Sky/ground background (rounded-square mask) ----
      *
-     * Uses the same rotated horizon endpoints as the horizon line.
-     * Cross product with the line direction determines which side a pixel is on.
-     *   cross = ldx·(py - lr.y) - ldy·(px - lr.x)
-     *   cross < 0 → sky,  cross > 0 → ground                     */
+     * Row-by-row fill clipped to a rounded square: flat edges on all four
+     * sides plus quarter-circle corners of radius cr = R * 0.2.
+     * Cross product with the horizon line direction determines sky vs ground. */
     {
         Vec2f hl = vec2f((float)(-R), horizon_offset);
         Vec2f hr = vec2f((float)(R),   horizon_offset);
@@ -214,7 +218,19 @@ static void draw_attitude_indicator(SDL_Renderer* r, const PFDLayout* lay,
 
         for (int dy = -R; dy <= R; dy++) {
             int y = cy + dy;
-            int w = (int)sqrtf((float)(R * R - dy * dy));
+            int abs_dy = (dy < 0) ? -dy : dy;
+
+            /* Compute half-width for this row (rounded-square shape) */
+            int w;
+            if (abs_dy <= flat_h) {
+                /* Flat side — full width */
+                w = R;
+            } else {
+                /* Corner zone — follow the quarter-circle arc */
+                float corner_dy = (float)(abs_dy - flat_h);
+                float corner_dx = sqrtf(cr2 - corner_dy * corner_dy);
+                w = (int)((float)R - cr + corner_dx);
+            }
             if (w <= 0) continue;
 
             int x0 = cx - w;
@@ -227,7 +243,6 @@ static void draw_attitude_indicator(SDL_Renderer* r, const PFDLayout* lay,
             int right_sky = (dist_right < 0.0f);
 
             if (left_sky == right_sky) {
-                /* Entire row is one colour */
                 if (left_sky) {
                     set_color(r, 0x00, 0x66, 0xCC, 255);
                 } else {
@@ -235,9 +250,6 @@ static void draw_attitude_indicator(SDL_Renderer* r, const PFDLayout* lay,
                 }
                 SDL_RenderDrawLine(r, x0, y, x1, y);
             } else {
-                /* Row is split — find crossing x where dist == 0.
-                 *   ldx·(dy - lr.y) - ldy·(x - cx - lr.x) = 0
-                 * → x = cx + lr.x + ldx·(dy - lr.y) / ldy              */
                 int cross_x;
                 if (fabsf(ldy) > 0.0001f) {
                     cross_x = cx + (int)(lr.x + ldx * ((float)dy - lr.y) / ldy);
@@ -247,20 +259,64 @@ static void draw_attitude_indicator(SDL_Renderer* r, const PFDLayout* lay,
                 if (cross_x < x0) cross_x = x0;
                 if (cross_x > x1) cross_x = x1;
 
-                /* Left side of split */
                 if (left_sky) {
                     set_color(r, 0x00, 0x66, 0xCC, 255);
                 } else {
                     set_color(r, 0x8B, 0x69, 0x14, 255);
                 }
                 SDL_RenderDrawLine(r, x0, y, cross_x, y);
-                /* Right side of split (opposite colour) */
+
                 if (left_sky) {
                     set_color(r, 0x8B, 0x69, 0x14, 255);
                 } else {
                     set_color(r, 0x00, 0x66, 0xCC, 255);
                 }
                 SDL_RenderDrawLine(r, cross_x, y, x1, y);
+            }
+        }
+    }
+
+    /* ---- Rounded-square border (white, 2 px thick) ---- */
+    {
+        set_color(r, COL_HORIZON_WHITE);
+        int icr = (int)cr;
+
+        /* Four straight edges */
+        /* top */
+        SDL_RenderDrawLine(r, cx - R + icr, cy - R, cx + R - icr, cy - R);
+        SDL_RenderDrawLine(r, cx - R + icr, cy - R + 1, cx + R - icr, cy - R + 1);
+        /* bottom */
+        SDL_RenderDrawLine(r, cx - R + icr, cy + R, cx + R - icr, cy + R);
+        SDL_RenderDrawLine(r, cx - R + icr, cy + R - 1, cx + R - icr, cy + R - 1);
+        /* left */
+        SDL_RenderDrawLine(r, cx - R, cy - R + icr, cx - R, cy + R - icr);
+        SDL_RenderDrawLine(r, cx - R + 1, cy - R + icr, cx - R + 1, cy + R - icr);
+        /* right */
+        SDL_RenderDrawLine(r, cx + R, cy - R + icr, cx + R, cy + R - icr);
+        SDL_RenderDrawLine(r, cx + R - 1, cy - R + icr, cx + R - 1, cy + R - icr);
+
+        /* Four corner arcs — approximate with 10 line segments each */
+        int n_seg = 10;
+        float corner_cx[4] = { (float)(cx + R - icr), (float)(cx + R - icr),
+                                (float)(cx - R + icr), (float)(cx - R + icr) };
+        float corner_cy[4] = { (float)(cy - R + icr), (float)(cy + R - icr),
+                                (float)(cy + R - icr), (float)(cy - R + icr) };
+        float start_a[4] = { (float)(-M_PI / 2.0),  0.0f,
+                              (float)(M_PI / 2.0),    (float)M_PI };
+
+        for (int corner = 0; corner < 4; corner++) {
+            float ccx = corner_cx[corner];
+            float ccy = corner_cy[corner];
+            for (int i = 0; i < n_seg; i++) {
+                float a0 = start_a[corner] + (float)i       * (float)(M_PI / 2.0) / (float)n_seg;
+                float a1 = start_a[corner] + (float)(i + 1) * (float)(M_PI / 2.0) / (float)n_seg;
+                int x0 = (int)(ccx + (float)icr * cosf(a0));
+                int y0 = (int)(ccy + (float)icr * sinf(a0));
+                int x1 = (int)(ccx + (float)icr * cosf(a1));
+                int y1 = (int)(ccy + (float)icr * sinf(a1));
+                SDL_RenderDrawLine(r, x0, y0, x1, y1);
+                /* 2px thick */
+                SDL_RenderDrawLine(r, x0 + 1, y0, x1 + 1, y1);
             }
         }
     }
@@ -424,18 +480,6 @@ static void draw_attitude_indicator(SDL_Renderer* r, const PFDLayout* lay,
     } else if (f->ias_kts > 340.0f) {
         set_color(r, COL_TEXT_RED);
         font_draw_scaled_aligned(r, cx, cy - R / 2, "OVERSPEED", 0.8f, FONT_BOLD, FONT_ALIGN_CENTER);
-    }
-
-    /* ---- Circle border ---- */
-    set_color(r, COL_LINE_GRAY);
-    for (int i = 0; i < 72; i++) {
-        float a1 = (float)i * 2.0f * (float)M_PI / 72.0f;
-        float a2 = (float)(i + 1) * 2.0f * (float)M_PI / 72.0f;
-        SDL_RenderDrawLine(r,
-                           cx + (int)((float)R * cosf(a1)),
-                           cy + (int)((float)R * sinf(a1)),
-                           cx + (int)((float)R * cosf(a2)),
-                           cy + (int)((float)R * sinf(a2)));
     }
 }
 
