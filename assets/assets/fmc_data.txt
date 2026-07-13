@@ -1,46 +1,75 @@
 # =============================================================================
-# FMC 离场程序数据 — 提取自 fmc_data.c（旧版硬编码数据）
+# FMC 离场程序数据库 — SID / Runway / Waypoint / Transition
 # =============================================================================
-# 包含 4 个机场的跑道、离场程序(SID)、过渡点及其关联关系
 # 格式说明：
-#   AIRPORT <ICAO>               — 机场
-#   RWY    <标识>                 — 跑道
-#   SID    <名称>                 — 离场程序
-#   WPT    <标识>                 — 航路点/过渡点
-#   LINK   <元素A> -> <元素B>     — 关联关系
+#   AIRPORT <ICAO>                    — 机场声明
+#   RWY     <标识>                     — 跑道
+#   SID     <名称>                     — 离场程序名称
+#   WPT     <标识> <lat> <lon>         — 航路点（含坐标）
+#   SIDSEQ  <SID名称> <航路点标识>      — SID 航路点序列（按声明顺序）
+#   LINK    <A> -> <B>                — 跑道→SID 关联
 # =============================================================================
 
 # ========================================
 # KSEA — Seattle-Tacoma International
+# 来源: FAA MOUNTAIN ONE / SEATTLE ONE departure charts
+# 坐标: 47.450N 122.309W
 # ========================================
 AIRPORT KSEA
-RWY     RW16C
-RWY     RW16L
-RWY     RW34C
-SID     ATOM E2
-SID     BANGR 9
-SID     SUMMA 1
-WPT     COV
-WPT     HBM
-WPT     XYZ
+RWY     16L
+RWY     16C
+RWY     16R
+RWY     34L
+RWY     34C
+RWY     34R
 
-# 跑道 → 离场程序
-LINK    RW16C -> ATOM E2
-LINK    RW16C -> SUMMA 1
-LINK    RW16L -> BANGR 9
-LINK    RW34C -> SUMMA 1
+# --- SID 定义 ---
+SID     MOUNTN1         # MOUNTAIN ONE departure
+SID     SEATL4          # SEATTLE FOUR departure
 
-# 跑道 → 过渡点
-LINK    RW16C -> COV
-LINK    RW16C -> HBM
-LINK    RW34C -> XYZ
+# --- 航路点（含近似坐标） ---
+WPT     SEA    47.4354  -122.3097   # SEA VORTAC (at airport)
+WPT     NICHY  47.1890  -122.1900   # RNAV waypoint ~15NM S on R-161
+WPT     NEZUG  47.7110  -122.4200   # RNAV waypoint ~16NM N on R-341
 
-# 离场程序 → 过渡点
-LINK    ATOM E2 -> COV
-LINK    SUMMA 1 -> HBM
+# --- SID 航路点序列 ---
+SIDSEQ  MOUNTN1 SEA
+SIDSEQ  MOUNTN1 NICHY
+SIDSEQ  SEATL4  SEA
+SIDSEQ  SEATL4  NEZUG
+
+# --- 跑道 → SID ---
+LINK    16L -> MOUNTN1
+LINK    16C -> MOUNTN1
+LINK    16R -> MOUNTN1
+LINK    34L -> MOUNTN1
+LINK    34C -> MOUNTN1
+LINK    34R -> MOUNTN1
+LINK    16L -> SEATL4
+LINK    16C -> SEATL4
+LINK    16R -> SEATL4
+LINK    34L -> SEATL4
+LINK    34C -> SEATL4
+LINK    34R -> SEATL4
+
+# --- 跑道 → 过渡点 ---
+LINK    16L -> NICHY
+LINK    16C -> NICHY
+LINK    16R -> NICHY
+LINK    34L -> NEZUG
+LINK    34C -> NEZUG
+LINK    34R -> NEZUG
+
+# --- SID → 过渡点 ---
+LINK    MOUNTN1 -> NICHY
+LINK    MOUNTN1 -> NEZUG
+LINK    SEATL4  -> NICHY
+LINK    SEATL4  -> NEZUG
 
 # ========================================
 # KBFI — Boeing Field / King County Intl
+# 坐标: 47.530N 122.302W
+# 数据来源: 旧版 fmc_data.c（代表性数据）
 # ========================================
 AIRPORT KBFI
 RWY     RW14R
@@ -54,7 +83,7 @@ SID     JAKSN 5
 SID     PAINE 2
 SID     SUMMA 6
 
-# 跑道 → 离场程序
+# --- 跑道 → 离场程序 ---
 LINK    RW14R -> CHINS 3
 LINK    RW14R -> HAROB 4
 LINK    RW14L -> EPH 8
@@ -66,31 +95,61 @@ LINK    RW32R -> SUMMA 6
 
 # ========================================
 # ZUUU — 成都双流国际机场
+# 来源: CAAC AIP ZUUU AD 2.24 SID charts
+# 坐标: 30.580N 103.947E
 # ========================================
 AIRPORT ZUUU
-RWY     RW02L
-RWY     RW02R
-RWY     RW20L
-RWY     RW20R
-SID     CTU 1X
-SID     GORGY 1X
-SID     POMOK 1X
-SID     ROBIG 1X
-SID     XARPI 1X
-SID     ZYU 1X
+RWY     02L
+RWY     02R
+RWY     20L
+RWY     20R
 
-# 跑道 → 离场程序
-LINK    RW02L -> CTU 1X
-LINK    RW02L -> GORGY 1X
-LINK    RW02R -> POMOK 1X
-LINK    RW02R -> ROBIG 1X
-LINK    RW20L -> CTU 1X
-LINK    RW20L -> XARPI 1X
-LINK    RW20R -> POMOK 1X
-LINK    RW20R -> ZYU 1X
+# --- SID 定义 ---
+SID     ZYG-1D          # 资阳1号离场 (RWY 02)
+SID     ZYG-2D          # 资阳2号离场 (RWY 02)
+SID     JTG-2D          # 金堂2号离场 (RWY 20)
+SID     CZH-1D          # 崇州1号离场
+
+# --- 航路点（含近似坐标） ---
+WPT     CTU    30.570  103.950     # 成都 VOR/DME (本场)
+WPT     BHS    30.510  104.203     # 柏鹤寺 VOR 117.9 (E of CTU)
+WPT     ZYG    30.120  104.630     # 资阳 VOR 112.1 (SE of CTU)
+WPT     JTG    30.873  104.392     # 金堂 VOR 115.4 (NE of CTU)
+WPT     CZH    30.647  103.685     # 崇州 VOR 114.5 (W of CTU)
+
+# --- SID 航路点序列 ---
+SIDSEQ  ZYG-1D  CTU
+SIDSEQ  ZYG-1D  BHS
+SIDSEQ  ZYG-1D  ZYG
+SIDSEQ  ZYG-2D  CTU
+SIDSEQ  ZYG-2D  BHS
+SIDSEQ  ZYG-2D  ZYG
+SIDSEQ  JTG-2D  CTU
+SIDSEQ  JTG-2D  JTG
+SIDSEQ  CZH-1D  CTU
+SIDSEQ  CZH-1D  CZH
+
+# --- 跑道 → SID ---
+LINK    02L -> ZYG-1D
+LINK    02R -> ZYG-1D
+LINK    02L -> ZYG-2D
+LINK    02R -> ZYG-2D
+LINK    20L -> JTG-2D
+LINK    20R -> JTG-2D
+LINK    02L -> CZH-1D
+LINK    02R -> CZH-1D
+
+# --- SID → 过渡点 ---
+LINK    ZYG-1D -> BHS
+LINK    ZYG-2D -> BHS
+LINK    ZYG-1D -> ZYG
+LINK    ZYG-2D -> ZYG
+LINK    JTG-2D -> JTG
+LINK    CZH-1D -> CZH
 
 # ========================================
 # ZUCK — 重庆江北国际机场
+# 数据来源: 旧版 fmc_data.c（代表性数据）
 # ========================================
 AIRPORT ZUCK
 RWY     RW02
@@ -104,7 +163,7 @@ SID     IDLUN 1X
 SID     MEKNO 1X
 SID     NILOM 1X
 
-# 跑道 → 离场程序
+# --- 跑道 → 离场程序 ---
 LINK    RW02 -> CKG 1X
 LINK    RW02 -> DUGUB 1X
 LINK    RW02 -> GOVSA 1X

@@ -1276,6 +1276,44 @@ static void handle_lsk(FMCData* d, int side, int line)
                                         sizeof(fp->sid.name) - 1);
                                 strncpy(fp->sid.runway, d->dep_sel_rwy,
                                         sizeof(fp->sid.runway) - 1);
+
+                                /* Inject SID waypoints at beginning of plan */
+                                char seq[DEP_DB_MAX_SIDSEQ][8];
+                                int seq_count = dep_db_get_sid_sequence(
+                                    apt, sid_list[sid_idx], seq);
+                                if (seq_count > 0) {
+                                    int shift = seq_count;
+                                    int avail = MAX_ROUTE_WAYPOINTS
+                                              - fp->waypoint_count;
+                                    if (shift > avail) shift = avail;
+                                    if (shift < 0) shift = 0;
+
+                                    /* Shift existing waypoints right */
+                                    for (int i = fp->waypoint_count - 1;
+                                         i >= 0; i--) {
+                                        fp->waypoints[i + shift]
+                                            = fp->waypoints[i];
+                                    }
+
+                                    /* Insert SID waypoints */
+                                    for (int j = 0; j < shift; j++) {
+                                        double lat = 0.0, lon = 0.0;
+                                        if (dep_db_find_wpt(apt, seq[j],
+                                                            &lat, &lon)) {
+                                            Waypoint w;
+                                            memset(&w, 0, sizeof(w));
+                                            strncpy(w.ident, seq[j],
+                                                    sizeof(w.ident) - 1);
+                                            w.pos.lat_deg = lat;
+                                            w.pos.lon_deg = lon;
+                                            w.type = WPT_WAYPOINT;
+                                            fp->waypoints[j] = w;
+                                        }
+                                    }
+                                    fp->waypoint_count += shift;
+                                    fp->active_waypoint_index = 0;
+                                    flight_plan_recalculate(fp);
+                                }
                                 d->fmc->plan_modified = 1;
                             }
                             d->dep_state = 0;

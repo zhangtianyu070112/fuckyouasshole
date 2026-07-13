@@ -21,6 +21,11 @@ static void trim_line(char* line)
     size_t len = strlen(line);
     while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r'))
         line[--len] = '\0';
+
+    /* Strip '#' comments (everything from # to end) */
+    char* hash = strchr(line, '#');
+    if (hash) { *hash = '\0'; len = (size_t)(hash - line); }
+
     /* Strip trailing spaces */
     while (len > 0 && line[len-1] == ' ')
         line[--len] = '\0';
@@ -74,9 +79,63 @@ int dep_db_load(DepartureDB* db, const char* path)
             cur->sid_count++;
         }
         else if (strcmp(token, "WPT") == 0 && cur) {
-            /* Waypoints are stored as transitions — we don't have a standalone
-             * wpt array in DepartureAirport; they're only meaningful as
-             * targets of LINK entries. Skip standalone WPT declarations. */
+            /* Parse: WPT <ident> <lat> <lon> */
+            if (cur->wpt_count >= DEP_DB_MAX_WPTS) continue;
+            DepWpt* w = &cur->wpts[cur->wpt_count];
+            memset(w, 0, sizeof(*w));
+            double lat = 0.0, lon = 0.0;
+            if (sscanf(line, "WPT %7s %lf %lf", w->ident, &lat, &lon) >= 3) {
+                w->lat_deg = lat;
+                w->lon_deg = lon;
+            } else {
+                /* Backward compat: no coordinates */
+                sscanf(line, "WPT %7s", w->ident);
+            }
+            cur->wpt_count++;
+        }
+        else if (strcmp(token, "SIDSEQ") == 0 && cur) {
+            /* Parse: SIDSEQ <sid_name> <wpt_ident>
+             * Appends wpt to the named SID's waypoint sequence */
+            char sid[32] = {0}, wpt[32] = {0};
+            /* SID name may contain spaces — read rest after "SIDSEQ " */
+            const char* rest = line + 7;  /* skip "SIDSEQ " */
+            while (*rest == ' ' || *rest == '\t') rest++;
+            /* Find the last space to split SID name from wpt ident */
+            const char* last_space = strrchr(rest, ' ');
+            if (last_space) {
+                size_t sid_len = (size_t)(last_space - rest);
+                /* Trim trailing spaces from sid name */
+                while (sid_len > 0 && (rest[sid_len-1] == ' ' || rest[sid_len-1] == '\t'))
+                    sid_len--;
+                if (sid_len >= sizeof(sid)) sid_len = sizeof(sid) - 1;
+                memcpy(sid, rest, sid_len);
+                sid[sid_len] = '\0';
+                sscanf(last_space + 1, "%31s", wpt);
+            } else {
+                /* Fallback: single-word names */
+                sscanf(line, "SIDSEQ %31s %31s", sid, wpt);
+            }
+
+            if (sid[0] && wpt[0]) {
+                /* Find or create SID sequence entry */
+                DepSidSeq* seq = NULL;
+                for (int i = 0; i < cur->sid_seq_count; i++) {
+                    if (strcmp(cur->sid_seq[i].sid, sid) == 0) {
+                        seq = &cur->sid_seq[i];
+                        break;
+                    }
+                }
+                if (!seq && cur->sid_seq_count < DEP_DB_MAX_SIDS) {
+                    seq = &cur->sid_seq[cur->sid_seq_count++];
+                    memset(seq, 0, sizeof(*seq));
+                    strncpy(seq->sid, sid, sizeof(seq->sid) - 1);
+                }
+                if (seq && seq->wpt_count < DEP_DB_MAX_SIDSEQ) {
+                    strncpy(seq->wpts[seq->wpt_count], wpt,
+                            sizeof(seq->wpts[0]) - 1);
+                    seq->wpt_count++;
+                }
+            }
         }
         else if (strcmp(token, "LINK") == 0 && cur) {
             /* Parse "LINK  <A> -> <B>" — split on "->" to handle spaces in names */
@@ -152,6 +211,12 @@ int dep_db_load(DepartureDB* db, const char* path)
 
     fclose(f);
     LOG_INFO("dep_db: loaded %d airports from %s", db->count, path);
+    for (int i = 0; i < db->count; i++) {
+        DepartureAirport* a = &db->airports[i];
+        LOG_INFO("  %s: %d rwy, %d sid, %d wpt, %d rwy-sid, %d sidseq",
+                 a->icao, a->runway_count, a->sid_count,
+                 a->wpt_count, a->rwy_sid_count, a->sid_seq_count);
+    }
     return 0;
 }
 
@@ -210,4 +275,35 @@ int dep_db_get_trans_for_runway(const DepartureAirport* apt, const char* runway,
         }
     }
     return count;
+}
+
+int dep_db_find_wpt(const DepartureAirport* apt, const char* ident,
+                    double* lat, double* lon)
+{
+    if (!apt || !ident || !lat || !lon) return 0;
+    for (int i = 0; i < apt->wpt_count; i++) {
+        if (strcmp(apt->wpts[i].ident, ident) == 0) {
+            *lat = apt->wpts[i].lat_deg;
+            *lon = apt->wpts[i].lon_deg;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int dep_db_get_sid_sequence(const DepartureAirport* apt, const char* sid,
+                            char wpts_out[DEP_DB_MAX_SIDSEQ][8])
+{
+    if (!apt || !sid || !wpts_out) return -1;
+    for (int i = 0; i < apt->sid_seq_count; i++) {
+        if (strcmp(apt->sid_seq[i].sid, sid) == 0) {
+            int n = apt->sid_seq[i].wpt_count;
+            for (int j = 0; j < n && j < DEP_DB_MAX_SIDSEQ; j++) {
+                strncpy(wpts_out[j], apt->sid_seq[i].wpts[j], 7);
+                wpts_out[j][7] = '\0';
+            }
+            return n;
+        }
+    }
+    return -1;
 }
