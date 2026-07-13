@@ -217,7 +217,7 @@ RouteGraph* route_graph_build(const FMCState* state)
     if (state->spatial_hash) {
         #define PROX_QUERY_MAX  32
         #define PROX_RANGE_NM   300.0f
-        NavSpatialEntry* results[PROX_QUERY_MAX];
+        NavQueryResult results[PROX_QUERY_MAX];
         int total_added = 0, zero_results = 0, find_failed = 0;
 
         for (int i = 0; i < g->node_count; i++) {
@@ -234,7 +234,7 @@ RouteGraph* route_graph_build(const FMCState* state)
                 if (n == 0) { zero_results++; continue; }
 
                 for (int r = 0; r < n && added < 20; r++) {
-                NavSpatialEntry* e = results[r];
+                NavSpatialEntry* e = results[r].entry;
                 if (!e || !e->ident[0]) continue;
                 int j = find_node(g, e->ident);
                 if (j < 0) { find_failed++; continue; }

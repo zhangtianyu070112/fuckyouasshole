@@ -36,6 +36,16 @@ typedef enum {
     NAV_NDB              /* NDB station */
 } NavSpatialType;
 
+struct NavSpatialEntry;  /* forward declaration (tag only) */
+
+/** Query result with pre-computed distance and bearing.
+ *  Avoids duplicate Haversine calls in ND rendering. */
+typedef struct {
+    struct NavSpatialEntry* entry; /* pointer into spatial hash (read-only) */
+    float            dist_nm;     /* distance from query position (NM) */
+    float            bearing_deg; /* bearing from query position (°) */
+} NavQueryResult;
+
 /** A single navigation entry stored in the spatial hash grid. */
 typedef struct NavSpatialEntry {
     char              ident[16];        /* Identifier (e.g. "LADIX", "ZBAA") */
@@ -120,7 +130,7 @@ uint64_t spatial_grid_key(double lat, double lon);
 int spatial_hash_query(const SpatialHash* sh,
                        double lat, double lon,
                        float heading_deg, float range_nm,
-                       NavSpatialEntry** results, int max_results);
+                       NavQueryResult* results, int max_results);
 
 /**
  * @brief Query count only (no result data) — fast check for nearby entries.

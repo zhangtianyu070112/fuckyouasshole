@@ -300,13 +300,18 @@ static void draw_route_overlay(SDL_Renderer* r, const SDL_Rect* rect, NDData* nd
         int waypoint_labels = (nd->range_nm <= 80) ? 1 : 0;
 
         for (int i = 0; i < count; i++) {
-            NavSpatialEntry* entry = nd->nearby_entries[i];
+            NavQueryResult* qr = &nd->nearby_entries[i];
+            NavSpatialEntry* entry = qr->entry;
             if (!entry) continue;
 
-            int sx, sy;
-            GeoPos ep = { entry->lat_deg, entry->lon_deg };
-            int vis = geo_to_screen(ac, hdg, px_nm, cx, cy, ep,
-                                    &sx, &sy, (float)nd->range_nm, radius);
+            /* Use pre-computed dist/bearing from spatial_hash_query —
+             * avoids a second Haversine call. */
+            float px_dist = qr->dist_nm * px_nm;
+            float rad     = (float)DEG2RAD((double)qr->bearing_deg - (double)hdg - 90.0);
+            int vis = (qr->dist_nm <= (double)nd->range_nm * 1.1);
+            if (px_dist > (float)radius) px_dist = (float)radius - 4.0f;
+            int sx = cx + (int)(px_dist * cosf(rad));
+            int sy = cy + (int)(px_dist * sinf(rad));
 
             switch (entry->type) {
             case NAV_WAYPOINT:
@@ -1114,24 +1119,26 @@ static void nd_on_update(Instrument* self, const FlightData* fd, float dt)
 
     /* Take full snapshot for render */
     flight_data_snapshot((FlightData*)fd, &nd->fd);
+
+    /* --- Override with high-accuracy RREF values (named paths, no index ambiguity) --- */
+    if (nd->fd.dref_nd_valid & 0x04) {
+        nd->fd.heading_mag_deg = nd->fd.dref_nd_mag_psi;   /* MAG — RREF, degrees */
+    }
+    if (nd->fd.dref_nd_valid & 0x08) {
+        nd->fd.tas_kts = nd->fd.dref_nd_true_airspeed * 1.94384f; /* TAS m/s→kts */
+    }
+    if (nd->fd.dref_nd_valid & 0x10) {
+        nd->fd.gs_kts = nd->fd.dref_nd_groundspeed * 1.94384f;   /* GS  m/s→kts */
+    }
+
     nd->smooth_hdg = exp_smooth_angle(nd->smooth_hdg, nd->fd.heading_mag_deg, 0.12f);
 
-    /* --- Compute ground track from GPS position delta --- */
-    if (fabs(nd->prev_lat) > 0.001 || fabs(nd->prev_lon) > 0.001) {
-        GeoPos prev = { nd->prev_lat, nd->prev_lon };
-        GeoPos curr = { nd->fd.lat_deg, nd->fd.lon_deg };
-        double dist = geo_distance_nm(prev, curr);
-        if (dist > 0.005) {  /* Moved at least ~30 ft — track is meaningful */
-            nd->track_true_deg = (float)geo_bearing_deg(prev, curr);
-            float mag_var = nd->fd.heading_true_deg - nd->fd.heading_mag_deg;
-            nd->track_mag_deg = nd->track_true_deg - mag_var;
-            if (nd->track_mag_deg < 0.0f)      nd->track_mag_deg += 360.0f;
-            if (nd->track_mag_deg >= 360.0f)   nd->track_mag_deg -= 360.0f;
-            nd->track_valid = 1;
-        }
+    /* --- Ground track from X-Plane RREF (mag_hpath = magnetic track °) --- */
+    if (nd->fd.dref_nd_valid & 0x40) {
+        nd->track_mag_deg  = nd->fd.dref_nd_mag_hpath;          /* already magnetic */
+        nd->track_true_deg = nd->fd.dref_nd_hpath;              /* true track */
+        nd->track_valid = 1;
     }
-    nd->prev_lat = nd->fd.lat_deg;
-    nd->prev_lon = nd->fd.lon_deg;
 
     /* Update course data from NAV1 */
     nd->crs_selector_deg = nd->fd.nav1_course;

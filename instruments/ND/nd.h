@@ -60,7 +60,7 @@ typedef struct {
     int    track_valid;
 
     /* --- Nearby nav entries cache (refreshed each frame) --- */
-    NavSpatialEntry* nearby_entries[512];
+    NavQueryResult   nearby_entries[512];
     int    nearby_count;
 
     /* --- Active course for CDI --- */

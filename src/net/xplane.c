@@ -65,17 +65,27 @@ static void apply_data_group(FlightDataValues* f, int index,
      *  FLIGHT PARAMETERS (indices unchanged from XP11)
      * ===================================================================== */
 
-    /* 3: Speeds */
+    /* 3: Speeds — XP12 layout varies by Data Output checkbox selection.
+     *     Debug log below prints raw values; check log to verify indices. */
     case 3:
+        {
+            static int dbg3 = 0;
+            if (dbg3++ % 60 == 0) {
+                LOG_INFO("G3 raw: [0]=%.1f [1]=%.1f [2]=%.1f [3]=%.1f [4]=%.1f [5]=%.1f [6]=%.1f [7]=%.1f",
+                         (double)vals[0], (double)vals[1], (double)vals[2], (double)vals[3],
+                         num_vals>4?(double)vals[4]:-1.0, num_vals>5?(double)vals[5]:-1.0,
+                         num_vals>6?(double)vals[6]:-1.0, num_vals>7?(double)vals[7]:-1.0);
+            }
+        }
         if (num_vals > 0) f->ias_kts  = vals[0];
-        if (num_vals > 2) f->tas_kts  = vals[2];
         if (num_vals > 3) f->gs_kts   = vals[3];
+        if (num_vals > 5) f->tas_kts  = vals[5];
         break;
 
-    /* 4: Mach, VVI, G-load — XP12 already ft/min */
+    /* 4: Mach, VVI, G-load — XP12 layout: mach, vs_fpm, -, -, -, -, -, g */
     case 4:
         if (num_vals > 0) f->mach   = vals[0];
-        if (num_vals > 2) f->vs_fpm = vals[2];  /* VVI is usually at index 2 in group 4 */
+        if (num_vals > 1) f->vs_fpm = vals[1];
         
         /* Calculate TAT accurately using OAT and Mach */
         f->tat_c = (f->oat_c + 273.15f) * (1.0f + 0.2f * f->mach * f->mach) - 273.15f;
@@ -760,6 +770,8 @@ int xplane_parse_rref(const uint8_t* data, int len, FlightData* fd)
     case XP_RREF_ND_MAG_PSI: fd->current.dref_nd_mag_psi      = value; fd->current.dref_nd_valid |= 0x04; break;
     case XP_RREF_ND_TAS:     fd->current.dref_nd_true_airspeed = value; fd->current.dref_nd_valid |= 0x08; break;
     case XP_RREF_ND_GS:      fd->current.dref_nd_groundspeed   = value; fd->current.dref_nd_valid |= 0x10; break;
+    case XP_RREF_ND_HPATH:     fd->current.dref_nd_hpath         = value; fd->current.dref_nd_valid |= 0x20; break;
+    case XP_RREF_ND_MAG_HPATH: fd->current.dref_nd_mag_hpath     = value; fd->current.dref_nd_valid |= 0x40; break;
     default: break;
     }
 
@@ -839,6 +851,8 @@ int xplane_rref_subscribe_nd(UDPSocket* sock, const char* xp_host, int xp_port)
         { XP_RREF_ND_MAG_PSI, "sim/flightmodel/position/mag_psi",        4 },
         { XP_RREF_ND_TAS,     "sim/flightmodel/position/true_airspeed",  4 },
         { XP_RREF_ND_GS,      "sim/flightmodel/position/groundspeed",    4 },
+        { XP_RREF_ND_HPATH,     "sim/flightmodel/position/hpath",          4 },
+        { XP_RREF_ND_MAG_HPATH, "sim/flightmodel/position/mag_hpath",      4 },
     };
 
     int num_subs = (int)(sizeof(subs) / sizeof(subs[0]));

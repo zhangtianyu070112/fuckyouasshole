@@ -189,11 +189,13 @@ int xplane_rref_subscribe_all(UDPSocket* sock, const char* xp_host, int xp_port)
  * These supplement the existing DATA packet stream with higher-precision
  * DREF values for the Navigation Display.
  */
-#define XP_RREF_ND_LAT      30  /* sim/flightmodel/position/latitude        */
-#define XP_RREF_ND_LON      31  /* sim/flightmodel/position/longitude       */
-#define XP_RREF_ND_MAG_PSI  32  /* sim/flightmodel/position/mag_psi         */
-#define XP_RREF_ND_TAS      33  /* sim/flightmodel/position/true_airspeed   */
-#define XP_RREF_ND_GS       34  /* sim/flightmodel/position/groundspeed     */
+#define XP_RREF_ND_LAT       30  /* sim/flightmodel/position/latitude        */
+#define XP_RREF_ND_LON       31  /* sim/flightmodel/position/longitude       */
+#define XP_RREF_ND_MAG_PSI   32  /* sim/flightmodel/position/mag_psi         */
+#define XP_RREF_ND_TAS       33  /* sim/flightmodel/position/true_airspeed   */
+#define XP_RREF_ND_GS        34  /* sim/flightmodel/position/groundspeed     */
+#define XP_RREF_ND_HPATH     35  /* sim/flightmodel/position/hpath           */
+#define XP_RREF_ND_MAG_HPATH 36  /* sim/flightmodel/position/mag_hpath       */
 
 /**
  * @brief Subscribe to all 5 ND-specific DREFs.

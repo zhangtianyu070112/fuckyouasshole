@@ -210,7 +210,7 @@ int spatial_hash_insert(SpatialHash* sh, const NavSpatialEntry* entry)
 int spatial_hash_query(const SpatialHash* sh,
                        double lat, double lon,
                        float heading_deg, float range_nm,
-                       NavSpatialEntry** results, int max_results)
+                       NavQueryResult* results, int max_results)
 {
     if (!sh || !results || max_results <= 0) return 0;
     if (max_results > MAX_RESULT_CAP) max_results = MAX_RESULT_CAP;
@@ -271,7 +271,11 @@ int spatial_hash_query(const SpatialHash* sh,
             double dist_nm = geo_distance_nm(query_pos, ep);
 
             if (dist_nm <= (double)range_nm) {
-                results[found] = entry;
+                /* Pre-compute bearing so ND rendering can skip Haversine */
+                double brg = geo_bearing_deg(query_pos, ep);
+                results[found].entry       = entry;
+                results[found].dist_nm     = (float)dist_nm;
+                results[found].bearing_deg = (float)brg;
                 found++;
             }
 
