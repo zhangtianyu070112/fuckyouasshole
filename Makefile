@@ -56,14 +56,19 @@ endif
 INC_FLAGS += $(CJSON_CFLAGS)
 LDFLAGS   += $(CJSON_LIBS)
 
-CFLAGS := $(WARN_FLAGS) $(OPT_FLAGS) $(INC_FLAGS) $(CFLAGS_GFX)
+# Work around GCC 16.1.0 MinGW ICE in AVX-512 intrinsics headers.
+# The bug is triggered when SDL2 → intrin.h → immintrin.h → avx512*intrin.h
+# is pulled in. Disabling AVX-512 ISA extensions skips the broken headers.
+CFLAGS_AVX_FIX := -mno-avx512f -mno-avx512vl -mno-avx512bw -mno-avx512dq
+
+CFLAGS := $(WARN_FLAGS) $(OPT_FLAGS) $(INC_FLAGS) $(CFLAGS_GFX) $(CFLAGS_AVX_FIX)
 
 # -----------------------------------------------------------------------------
 # Source files
 # -----------------------------------------------------------------------------
 
 # Existing subdirectory modules — .o next to .c in src/<dir>/
-SRC_DIRS := src/utils src/net src/data src/ds src/map src/audio
+SRC_DIRS := src/utils src/net src/data src/ds src/map src/audio src/cabin_old
 SRCS     := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.c))
 OBJS     := $(SRCS:.c=.o)
 DEPS     := $(SRCS:.c=.d)

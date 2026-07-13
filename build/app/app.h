@@ -26,6 +26,7 @@ typedef struct MockDataCtx MockDataCtx;
 typedef struct AlertSystem AlertSystem;
 typedef struct UDPSocket   UDPSocket;
 typedef struct MapDisplay  MapDisplay;
+typedef struct CabinOld    CabinOld;
 typedef struct AIAdvisor   AIAdvisor;
 typedef struct DepartureDB  DepartureDB;
 
@@ -96,8 +97,11 @@ typedef struct App {
     char           xp_host[64];
     int            xp_send_port;
 
-    /* Cabin moving map display (native SDL2) */
+    /* Cabin moving map display (native SDL2 OpenGL 3D globe) */
     MapDisplay*    map_display;
+
+    /* Cabin tile-based 2D map (高德瓦片, legacy) */
+    CabinOld*      cabin_old;
 
     /* AI Co-pilot advisor (WebSocket to inference server) */
     AIAdvisor*     ai_advisor;

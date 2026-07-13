@@ -29,6 +29,7 @@
 #include "audio/alert_system.h"
 #include "utils/font_manager.h"
 #include "map/map_display.h"
+#include "cabin_old/cabin_old.h"
 #include "ai/ai_advisor.h"
 
 #include <SDL2/SDL_image.h>
@@ -685,10 +686,16 @@ static void main_loop(App* app)
             /* alert_system_test_beeps(app->alert_sys, &snapshot); */
         }
 
-        /* 3c. Update & render Cabin Map Display */
+        /* 3c. Update & render Cabin Map Display (OpenGL 3D globe) */
         if (app->map_display) {
             map_display_update_position(app->map_display, &snapshot);
             map_display_render(app->map_display);
+        }
+
+        /* 3c2. Update & render CabinOld (高德 tile-based 2D map) */
+        if (app->cabin_old) {
+            cabin_old_update_position(app->cabin_old, &snapshot);
+            cabin_old_render(app->cabin_old);
         }
 
         /* 3d. Update AI advisor (non-blocking WebSocket) */
@@ -1321,8 +1328,11 @@ int app_run_with_config(const char* config_path)
     start_data_source(app);
     fprintf(stderr, "[STARTUP] 7/7 Entering main loop\n");
 
-    /* 8c. Start Cabin Map Display */
+    /* 8c. Start Cabin Map Display (OpenGL 3D globe) */
     app->map_display = map_display_create(app->config, app->fmc_state);
+
+    /* 8c2. Start CabinOld (高德 tile-based 2D map) */
+    app->cabin_old = cabin_old_create(app->config, app->fmc_state);
 
     /* 8d. Start AI Co-pilot advisor (WebSocket to inference server) */
     {
@@ -1376,10 +1386,16 @@ cleanup:
         app->mock_ctx = NULL;
     }
 
-    /* Stop Cabin Map Display */
+    /* Stop Cabin Map Display (OpenGL 3D globe) */
     if (app->map_display) {
         map_display_destroy(app->map_display);
         app->map_display = NULL;
+    }
+
+    /* Stop CabinOld (高德 tile-based 2D map) */
+    if (app->cabin_old) {
+        cabin_old_destroy(app->cabin_old);
+        app->cabin_old = NULL;
     }
 
     /* Stop AI Co-pilot advisor */
