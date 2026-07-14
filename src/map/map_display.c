@@ -34,6 +34,10 @@
 #define CAMERA_DIST_MIN     0.6f
 #define CAMERA_DIST_MAX     3.0f
 #define GLOBE_TILT_DEFAULT  22.0f
+#define GLOBE_ZOOM_CYCLE_MS  22000   /* full cycle: 10s + 1s trans + 10s + 1s trans */
+#define GLOBE_ZOOM_HOLD_MS   10000   /* hold duration at each zoom level */
+#define GLOBE_ZOOM_TRANS_MS  1000    /* transition duration */
+#define GLOBE_ZOOM_SCALE     0.6f    /* target screen scale (smaller = more zoomed out) */
 
 #define SPHERE_LATS         64
 #define SPHERE_LONS         128
@@ -807,6 +811,57 @@ static int weather_overlay_visible(void)
     return ((now % (uint64_t)WEATHER_CYCLE_MS) < (uint64_t)WEATHER_SHOW_MS) ? 1 : 0;
 }
 
+/* =========================================================================
+ *  Globe zoom animation — 10s hold → 1s ease → 10s hold → 1s ease → repeat
+ * ========================================================================= */
+
+/** Smoothstep easing: 0→0, 1→1, zero derivative at both ends. */
+static float smoothstepf(float t)
+{
+    if (t <= 0.0f) return 0.0f;
+    if (t >= 1.0f) return 1.0f;
+    return t * t * (3.0f - 2.0f * t);
+}
+
+/**
+ * @brief Compute animated camera-distance multiplier for the zoom cycle.
+ *
+ * Cycle timeline (22 s total):
+ *   [0, 10s)  → factor = 1.0        (normal size)
+ *   [10s, 11s) → factor = 1 → 1.667 (ease to 60% size)
+ *   [11s, 21s) → factor = 1.667     (small size)
+ *   [21s, 22s) → factor = 1.667 → 1 (ease back)
+ *
+ * @return multiplier for camera_dist (>1 = zoomed out).
+ */
+static float compute_globe_zoom(void)
+{
+    uint64_t now     = SDL_GetTicks64();
+    uint64_t cycle   = (uint64_t)GLOBE_ZOOM_CYCLE_MS;
+    uint64_t hold    = (uint64_t)GLOBE_ZOOM_HOLD_MS;
+    uint64_t trans   = (uint64_t)GLOBE_ZOOM_TRANS_MS;
+    uint64_t phase   = now % cycle;
+
+    /* Screen scale = 1 / camera_distance, so at 0.6x size distance *= 1/0.6 */
+    float target = 1.0f / GLOBE_ZOOM_SCALE;   /* ≈ 1.667 */
+
+    if (phase < hold) {
+        /* Phase A: normal size */
+        return 1.0f;
+    } else if (phase < hold + trans) {
+        /* Phase B: ease normal → small */
+        float t = (float)(phase - hold) / (float)trans;
+        return 1.0f + (target - 1.0f) * smoothstepf(t);
+    } else if (phase < hold + trans + hold) {
+        /* Phase C: small size */
+        return target;
+    } else {
+        /* Phase D: ease small → normal */
+        float t = (float)(phase - hold - trans - hold) / (float)trans;
+        return target + (1.0f - target) * smoothstepf(t);
+    }
+}
+
 static void render_weather_overlay_2d(MapDisplay* md)
 {
     if (!weather_overlay_visible()) return;
@@ -1002,8 +1057,9 @@ void map_display_render(MapDisplay* md)
     glLoadIdentity();
 
     /* Camera at eye-level (Y=0) so the view ray passes exactly through
-     * (0,0,R) where the aircraft is centered by globe rotations. */
-    gluLookAt(0.0, 0.0, (double)md->camera_dist,   /* camera */
+     * (0,0,R) where the aircraft is centered by globe rotations.
+     * Zoom factor cycles the camera distance for auto-zoom animation. */
+    gluLookAt(0.0, 0.0, (double)md->camera_dist * (double)compute_globe_zoom(),
               0.0, 0.0, 0.0,                       /* target */
               0.0, 1.0, 0.0);                       /* up */
 
