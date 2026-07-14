@@ -894,7 +894,7 @@ static void render_weather_overlay_2d(MapDisplay* md)
     int col_w = w / 2;
     int cx_left  = col_w / 2;
     int cx_right = col_w + col_w / 2;
-    int y = map_top + 20;
+    int y = map_top + 28;
 
     /* --- Departure (left column) --- */
     {
@@ -907,21 +907,21 @@ static void render_weather_overlay_2d(MapDisplay* md)
         /* DEPARTURE label */
         tex = text_to_texture(md->font_small, "DEPARTURE", c_label, &tw, &th);
         draw_text_quad(tex, tw, th, cx_left, y, 0); glDeleteTextures(1, &tex);
-        y += 22;
+        y += 26;
 
         /* ICAO */
         tex = text_to_texture(md->font_large, dep_icao, c_white, &tw, &th);
         draw_text_quad(tex, tw, th, cx_left, y, 0); glDeleteTextures(1, &tex);
-        y += 26;
+        y += 32;
 
         /* Weather */
         char wx_str[64] = "--";
         if (md->weather_dep.weather[0])
             snprintf(wx_str, sizeof(wx_str), "%s  %.0f°C",
                      md->weather_dep.weather, (double)md->weather_dep.temp_c);
-        tex = text_to_texture(md->font_small, wx_str, c_gray, &tw, &th);
+        tex = text_to_texture(md->font_large, wx_str, c_gray, &tw, &th);
         draw_text_quad(tex, tw, th, cx_left, y, 0); glDeleteTextures(1, &tex);
-        y += 20;
+        y += 32;
 
         /* Local time */
         char dep_time[16] = "--:--";
@@ -931,13 +931,13 @@ static void render_weather_overlay_2d(MapDisplay* md)
             if (tm_info) snprintf(dep_time, sizeof(dep_time), "%02d:%02d LT",
                                   tm_info->tm_hour, tm_info->tm_min);
         }
-        tex = text_to_texture(md->font_small, dep_time, c_white, &tw, &th);
+        tex = text_to_texture(md->font_large, dep_time, c_white, &tw, &th);
         draw_text_quad(tex, tw, th, cx_left, y, 0); glDeleteTextures(1, &tex);
     }
 
     /* --- Arrival (right column) --- */
     {
-        y = map_top + 20;  /* reset y */
+        y = map_top + 28;  /* reset y */
         SDL_Color c_label = {138, 180, 216, 255};
         SDL_Color c_white = {255, 255, 255, 255};
         SDL_Color c_gray  = {180, 190, 200, 255};
@@ -947,21 +947,21 @@ static void render_weather_overlay_2d(MapDisplay* md)
         /* ARRIVAL label */
         tex = text_to_texture(md->font_small, "ARRIVAL", c_label, &tw, &th);
         draw_text_quad(tex, tw, th, cx_right, y, 0); glDeleteTextures(1, &tex);
-        y += 22;
+        y += 26;
 
         /* ICAO */
         tex = text_to_texture(md->font_large, arr_icao, c_white, &tw, &th);
         draw_text_quad(tex, tw, th, cx_right, y, 0); glDeleteTextures(1, &tex);
-        y += 26;
+        y += 32;
 
         /* Weather */
         char wx_str[64] = "--";
         if (md->weather_arr.weather[0])
             snprintf(wx_str, sizeof(wx_str), "%s  %.0f°C",
                      md->weather_arr.weather, (double)md->weather_arr.temp_c);
-        tex = text_to_texture(md->font_small, wx_str, c_gray, &tw, &th);
+        tex = text_to_texture(md->font_large, wx_str, c_gray, &tw, &th);
         draw_text_quad(tex, tw, th, cx_right, y, 0); glDeleteTextures(1, &tex);
-        y += 20;
+        y += 32;
 
         /* ETA */
         char arr_time[16] = "--:--";
@@ -974,7 +974,7 @@ static void render_weather_overlay_2d(MapDisplay* md)
                 snprintf(arr_time, sizeof(arr_time), "+%02d:%02d", hh, mm);
             }
         }
-        tex = text_to_texture(md->font_small, arr_time, c_white, &tw, &th);
+        tex = text_to_texture(md->font_large, arr_time, c_white, &tw, &th);
         draw_text_quad(tex, tw, th, cx_right, y, 0); glDeleteTextures(1, &tex);
     }
 }
