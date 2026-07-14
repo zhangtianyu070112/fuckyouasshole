@@ -1,6 +1,9 @@
 /**
  * @file    weather_fetch.c
- * @brief   Fetch weather from 高德 REST APIs via libcurl + cJSON.
+ * @brief   Fetch weather from Open-Meteo free API via libcurl + cJSON.
+ *
+ * Open-Meteo is a free, no-API-key global weather service.
+ * Replaces the 高德 weather API which only supports Chinese cities.
  */
 
 #include "weather_fetch.h"
@@ -11,6 +14,48 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+
+/* =========================================================================
+ *  WMO Weather Code → Chinese Description
+ *
+ *  Reference: https://www.nodc.noaa.gov/archive/arc0021/0002199/1.1/
+ *             data/0-data/HTML/WMO-CODE/WMO4677.HTM
+ * ========================================================================= */
+
+static const char* wmo_to_chinese(int code)
+{
+    switch (code) {
+        case 0:  return "\xe6\x99\xb4";            /* 晴 */
+        case 1:  return "\xe5\xb0\x91\xe4\xba\x91"; /* 少云 */
+        case 2:  return "\xe5\xa4\x9a\xe4\xba\x91"; /* 多云 */
+        case 3:  return "\xe9\x98\xb4";            /* 阴 */
+        case 45:
+        case 48: return "\xe9\x9b\xbe";            /* 雾 */
+        case 51: return "\xe5\xb0\x8f\xe9\x9b\xa8"; /* 小雨 */
+        case 53: return "\xe4\xb8\xad\xe9\x9b\xa8"; /* 中雨 */
+        case 55: return "\xe5\xa4\xa7\xe9\x9b\xa8"; /* 大雨 */
+        case 56:
+        case 57: return "\xe5\x86\xbb\xe9\x9b\xa8"; /* 冻雨 */
+        case 61: return "\xe5\xb0\x8f\xe9\x9b\xa8"; /* 小雨 */
+        case 63: return "\xe4\xb8\xad\xe9\x9b\xa8"; /* 中雨 */
+        case 65: return "\xe5\xa4\xa7\xe9\x9b\xa8"; /* 大雨 */
+        case 66:
+        case 67: return "\xe5\x86\xbb\xe9\x9b\xa8"; /* 冻雨 */
+        case 71: return "\xe5\xb0\x8f\xe9\x9b\xaa"; /* 小雪 */
+        case 73: return "\xe4\xb8\xad\xe9\x9b\xaa"; /* 中雪 */
+        case 75: return "\xe5\xa4\xa7\xe9\x9b\xaa"; /* 大雪 */
+        case 77: return "\xe9\x9b\xaa";            /* 雪 */
+        case 80: return "\xe9\x98\xb5\xe9\x9b\xa8"; /* 阵雨 */
+        case 81: return "\xe9\x98\xb5\xe9\x9b\xa8"; /* 阵雨 */
+        case 82: return "\xe5\xbc\xba\xe9\x98\xb5\xe9\x9b\xa8"; /* 强阵雨 */
+        case 85: return "\xe9\x98\xb5\xe9\x9b\xaa"; /* 阵雪 */
+        case 86: return "\xe5\xbc\xba\xe9\x98\xb5\xe9\x9b\xaa"; /* 强阵雪 */
+        case 95: return "\xe9\x9b\xb7\xe6\x9a\xb4"; /* 雷暴 */
+        case 96:
+        case 99: return "\xe9\x9b\xb7\xe6\x9a\xb4\xe5\x86\xb0\xe9\x9b\xb9"; /* 雷暴冰雹 */
+        default: return "\xe6\x9c\xaa\xe7\x9f\xa5"; /* 未知 */
+    }
+}
 
 /* =========================================================================
  *  libcurl write callback — append data to a dynamic buffer
@@ -69,52 +114,26 @@ static char* curl_get(const char* url)
 }
 
 /* =========================================================================
- *  Reverse geocode → adcode
+ *  Public API
  * ========================================================================= */
 
-static char* regeo_get_adcode(const char* api_key, double lon, double lat)
+int weather_fetch_for_coords(double lat, double lon,
+                             char* weather_out, size_t weather_sz,
+                             float* temp_out, int* humidity_out)
 {
+    /* Init defaults */
+    if (weather_out) weather_out[0] = '\0';
+    if (temp_out) *temp_out = -999.0f;
+    if (humidity_out) *humidity_out = -1;
+
+    /* Build Open-Meteo URL — single call, no API key needed */
     char url[512];
     snprintf(url, sizeof(url),
-        "https://restapi.amap.com/v3/geocode/regeo?"
-        "key=%s&location=%.6f,%.6f&output=JSON",
-        api_key, lon, lat);
-
-    char* json_str = curl_get(url);
-    if (!json_str) return NULL;
-
-    cJSON* root = cJSON_Parse(json_str);
-    free(json_str);
-    if (!root) return NULL;
-
-    char* adcode = NULL;
-    cJSON* regeo = cJSON_GetObjectItem(root, "regeocode");
-    if (regeo) {
-        cJSON* comp = cJSON_GetObjectItem(regeo, "addressComponent");
-        if (comp) {
-            cJSON* ac = cJSON_GetObjectItem(comp, "adcode");
-            if (ac && cJSON_IsString(ac)) {
-                adcode = strdup(ac->valuestring);
-            }
-        }
-    }
-    cJSON_Delete(root);
-    return adcode;
-}
-
-/* =========================================================================
- *  Weather query
- * ========================================================================= */
-
-static int weather_query(const char* api_key, const char* adcode,
-                         char* weather_out, size_t weather_sz,
-                         float* temp_out, int* humidity_out)
-{
-    char url[512];
-    snprintf(url, sizeof(url),
-        "https://restapi.amap.com/v3/weather/weatherInfo?"
-        "key=%s&city=%s&extensions=base&output=JSON",
-        api_key, adcode);
+        "https://api.open-meteo.com/v1/forecast?"
+        "latitude=%.6f&longitude=%.6f"
+        "&current=temperature_2m,relative_humidity_2m,weather_code"
+        "&timezone=auto",
+        lat, lon);
 
     char* json_str = curl_get(url);
     if (!json_str) return -1;
@@ -124,64 +143,37 @@ static int weather_query(const char* api_key, const char* adcode,
     if (!root) return -1;
 
     int ok = -1;
-    cJSON* lives = cJSON_GetObjectItem(root, "lives");
-    if (lives && cJSON_IsArray(lives)) {
-        cJSON* live = cJSON_GetArrayItem(lives, 0);
-        if (live) {
-            cJSON* w = cJSON_GetObjectItem(live, "weather");
-            cJSON* t = cJSON_GetObjectItem(live, "temperature");
-            cJSON* h = cJSON_GetObjectItem(live, "humidity");
+    cJSON* current = cJSON_GetObjectItem(root, "current");
+    if (current && cJSON_IsObject(current)) {
+        cJSON* w = cJSON_GetObjectItem(current, "weather_code");
+        cJSON* t = cJSON_GetObjectItem(current, "temperature_2m");
+        cJSON* h = cJSON_GetObjectItem(current, "relative_humidity_2m");
 
-            if (w && cJSON_IsString(w) && weather_out) {
-                strncpy(weather_out, w->valuestring, weather_sz - 1);
-                weather_out[weather_sz - 1] = '\0';
-            }
-            if (t && cJSON_IsString(t) && temp_out) {
-                *temp_out = (float)atof(t->valuestring);
-            }
-            if (h && cJSON_IsString(h) && humidity_out) {
-                *humidity_out = atoi(h->valuestring);
-            }
-            ok = 0;
+        if (w && cJSON_IsNumber(w) && weather_out) {
+            const char* desc = wmo_to_chinese(w->valueint);
+            strncpy(weather_out, desc, weather_sz - 1);
+            weather_out[weather_sz - 1] = '\0';
         }
+        if (t && cJSON_IsNumber(t) && temp_out) {
+            *temp_out = (float)t->valuedouble;
+        }
+        if (h && cJSON_IsNumber(h) && humidity_out) {
+            *humidity_out = (int)h->valuedouble;
+        }
+        ok = 0;
     }
+
     cJSON_Delete(root);
-    return ok;
-}
 
-/* =========================================================================
- *  Public API
- * ========================================================================= */
-
-int weather_fetch_for_coords(const char* api_key,
-                             double lat, double lon,
-                             char* weather_out, size_t weather_sz,
-                             float* temp_out, int* humidity_out)
-{
-    if (!api_key || !api_key[0]) return -1;
-
-    if (weather_out) weather_out[0] = '\0';
-    if (temp_out) *temp_out = -999.0f;
-    if (humidity_out) *humidity_out = -1;
-
-    /* Step 1: reverse geocode → adcode */
-    char* adcode = regeo_get_adcode(api_key, lon, lat);
-    if (!adcode) {
-        LOG_WARN("Weather: regeo failed for %.4f,%.4f", lat, lon);
-        return -1;
-    }
-    LOG_DEBUG("Weather: regeo %.4f,%.4f → adcode=%s", lat, lon, adcode);
-
-    /* Step 2: weather query */
-    int ret = weather_query(api_key, adcode, weather_out, weather_sz,
-                            temp_out, humidity_out);
-    if (ret == 0) {
-        LOG_INFO("Weather: %s %.1f°C %d%% (adcode=%s)",
+    if (ok == 0) {
+        LOG_INFO("Weather: %.4f,%.4f → %s %.1f°C %d%%",
+                 lat, lon,
                  weather_out ? weather_out : "?",
                  temp_out ? (double)*temp_out : -999.0,
-                 humidity_out ? *humidity_out : -1,
-                 adcode);
+                 humidity_out ? *humidity_out : -1);
+    } else {
+        LOG_WARN("Weather: no current data for %.4f,%.4f", lat, lon);
     }
-    free(adcode);
-    return ret;
+
+    return ok;
 }

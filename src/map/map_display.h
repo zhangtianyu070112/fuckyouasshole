@@ -38,9 +38,6 @@ typedef struct {
 } WeatherInfo;
 
 typedef struct MapDisplay {
-    /* --- Config --- */
-    char           api_key[64];
-
     /* --- SDL window --- */
     SDL_Window*    window;
     SDL_GLContext  gl_ctx;

@@ -388,7 +388,7 @@ static void render_header(CabinOld* co)
                  co->fmc->flight_plan.departure.icao,
                  co->fmc->flight_plan.arrival.icao);
     SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
-    font_draw(r, co->win_w / 2, CABIN_HEADER_H / 2, buf, 12, FONT_BOLD);
+    font_draw(r, co->win_w / 2, CABIN_HEADER_H / 2, buf, 12, FONT_CJK);
 }
 
 static void render_data_bar(CabinOld* co)
@@ -427,9 +427,9 @@ static void render_data_bar(CabinOld* co)
     for (int i = 0; i < 7; i++) {
         int cx = col_w * i + col_w / 2;
         SDL_SetRenderDrawColor(r, 138, 180, 216, 255);
-        font_draw(r, cx, bar_y + 10, labels[i], 8, FONT_REGULAR);
+        font_draw(r, cx, bar_y + 10, labels[i], 8, FONT_CJK);
         SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
-        font_draw(r, cx, bar_y + 34, vals[i], 14, FONT_BOLD);
+        font_draw(r, cx, bar_y + 34, vals[i], 14, FONT_CJK);
     }
 }
 

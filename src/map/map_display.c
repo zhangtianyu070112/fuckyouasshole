@@ -269,7 +269,6 @@ static void interpolate_position(MapDisplay* md)
 
 typedef struct {
     MapDisplay* md;
-    char        api_key[64];
     double      dep_lat, dep_lon;
     double      arr_lat, arr_lon;
 } WeatherFetchCtx;
@@ -279,11 +278,11 @@ static int weather_fetch_thread_func(void* data)
     WeatherFetchCtx* ctx = (WeatherFetchCtx*)data;
     MapDisplay* md = ctx->md;
 
-    weather_fetch_for_coords(ctx->api_key, ctx->dep_lat, ctx->dep_lon,
+    weather_fetch_for_coords(ctx->dep_lat, ctx->dep_lon,
         md->weather_dep.weather, sizeof(md->weather_dep.weather),
         &md->weather_dep.temp_c, &md->weather_dep.humidity);
 
-    weather_fetch_for_coords(ctx->api_key, ctx->arr_lat, ctx->arr_lon,
+    weather_fetch_for_coords(ctx->arr_lat, ctx->arr_lon,
         md->weather_arr.weather, sizeof(md->weather_arr.weather),
         &md->weather_arr.temp_c, &md->weather_arr.humidity);
 
@@ -306,7 +305,6 @@ static void check_weather_fetch(MapDisplay* md)
     WeatherFetchCtx* ctx = (WeatherFetchCtx*)calloc(1, sizeof(WeatherFetchCtx));
     if (!ctx) return;
     ctx->md = md;
-    strncpy(ctx->api_key, md->api_key, sizeof(ctx->api_key) - 1);
     ctx->dep_lat = fp->waypoints[0].pos.lat_deg;
     ctx->dep_lon = fp->waypoints[0].pos.lon_deg;
     ctx->arr_lat = fp->waypoints[fp->waypoint_count - 1].pos.lat_deg;
@@ -329,15 +327,10 @@ static void check_weather_fetch(MapDisplay* md)
 
 MapDisplay* map_display_create(const Config* cfg, FMCState* fmc)
 {
+    (void)cfg;  /* unused — weather now uses Open-Meteo (no API key needed) */
     MapDisplay* md = (MapDisplay*)calloc(1, sizeof(MapDisplay));
     if (!md) return NULL;
     md->fmc = fmc;
-
-    /* Read API key for weather */
-    if (cfg) {
-        const char* key = config_get_str(cfg, "map", "amap_api_key", "");
-        strncpy(md->api_key, key, sizeof(md->api_key) - 1);
-    }
 
     /* OpenGL attributes */
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
@@ -413,10 +406,10 @@ MapDisplay* map_display_create(const Config* cfg, FMCState* fmc)
     md->globe_rot_y = 0.0f;
     md->target_rot_y = 0.0f;
 
-    /* Load fonts for 2D overlay */
-    md->font_small = TTF_OpenFont("resources/fonts/B612-Regular.ttf", 14);
-    md->font_large = TTF_OpenFont("resources/fonts/B612-Regular.ttf", 20);
-    md->font_bold  = TTF_OpenFont("resources/fonts/B612-Bold.ttf", 20);
+    /* Load fonts for 2D overlay — Alibaba PuHuiTi supports CJK */
+    md->font_small = TTF_OpenFont("resources/fonts/ALIBABAPUHUITI-2-45-LIGHT.TTF", 14);
+    md->font_large = TTF_OpenFont("resources/fonts/ALIBABAPUHUITI-2-45-LIGHT.TTF", 20);
+    md->font_bold  = TTF_OpenFont("resources/fonts/ALIBABAPUHUITI-2-45-LIGHT.TTF", 22);
 
     /* Window size */
     SDL_GetWindowSize(md->window, &md->win_w, &md->win_h);
