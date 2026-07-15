@@ -1,0 +1,480 @@
+\documentclass[12pt,a4paper]{ctexart}
+
+% ============ 页面布局 ============
+\usepackage[top=2.5cm, bottom=2.5cm, left=3.0cm, right=2.5cm]{geometry}
+\usepackage{indentfirst}
+\setlength{\parskip}{6pt}
+
+% ============ 图表 ============
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{array}
+
+% ============ 其他 ============
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=cyan,
+}
+
+% ============ 页眉页脚 ============
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{航空驾驶舱模拟控制系统}
+\fancyhead[R]{项目需求报告}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% ============ 标题页信息 ============
+\title{\textbf{航空驾驶舱模拟控制系统 \\ 项目需求报告}}
+\author{}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\vspace{1.5cm}
+
+\begin{center}
+\begin{tabular}{rl}
+\textbf{项目名称} & 航空驾驶舱模拟控制系统 \\
+\textbf{英文名称} & Flight Cockpit Simulation Control System \\
+\textbf{文档性质} & 开题阶段需求分析 \\
+\textbf{文档版本} & v1.0 \\
+\textbf{编制日期} & 2026年6月下旬 \\
+\end{tabular}
+\end{center}
+
+\newpage
+
+\tableofcontents
+\newpage
+
+% ================================================================
+\section{项目背景}
+
+% ================================================================
+
+全动飞行模拟器（Full Flight Simulator, FFS）是民航飞行员训练的核心装备，但其单台造价通常在千万人民币级别，维护复杂度高，仅能满足专业民航机组的高端训练需求。对于航空院校学生、飞行爱好者以及通航培训机构而言，接触真实驾驶舱环境的机会极为有限，存在训练门槛高、场景覆盖有限、交互体验不足等现实问题。
+
+与此同时，消费级个人计算机的图形与计算能力在过去十年间取得了显著提升——主流桌面 CPU 的实时渲染能力已足以支撑多块航电仪表的 60 FPS 刷新，UDP 网络通信可以低延迟地接入外部飞行仿真数据源。这为\"低成本、高还原度的桌面级飞行驾驶舱仿真系统\"提供了技术可行性。
+
+本项目的目标是：\textbf{以 C 语言为核心开发语言，基于 SDL2 图形框架，构建一套可在 Windows 平台上独立运行的商用客机驾驶舱模拟控制系统。}系统将完整复刻核心航电设备的显示逻辑与交互方式，通过 UDP 协议接入外部飞行仿真平台获取实时飞行参数，并实现飞行管理计算机（FMC）的航路规划功能。
+
+% ================================================================
+\section{项目目标}
+
+% ================================================================
+
+\subsection{知识目标}
+
+本项目旨在将 C 语言课程所学的语法知识转化为系统级开发能力。具体包括：
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{指针与动态内存管理}：在数万行规模的工程项目中实践动态内存分配与释放，确保无内存泄漏。这要求开发者在设计阶段就明确每个结构体的所有权归属和生命周期。
+    \item \textbf{结构体与模块化设计}：飞行参数、仪表状态、网络协议包、图数据结构等均需要设计为清晰的结构体，字段含义明确，嵌套层次合理。
+    \item \textbf{SDL2 图形渲染体系}：掌握 SDL2 及其扩展库（SDL2\_image、SDL2\_ttf、SDL2\_gfx）的窗口管理、渲染管线、纹理缓存、TTF 字体渲染与事件循环机制。
+    \item \textbf{航电仪表显示逻辑}：理解并实现 PFD（主飞行显示器）、ND（导航显示器）、EICAS（发动机指示与机组告警系统）三类核心仪表的界面布局与动态刷新规则。
+    \item \textbf{FMC 飞行管理计算机模拟}：实现航路编辑、飞行计划管理、进离场程序配置等核心业务逻辑。
+    \item \textbf{核心数据结构的设计与实现}：在纯 C 环境中（无 STL 可用）从零实现哈希表、链表、平衡二叉树等数据结构，并针对具体业务场景（如导航数据快速检索、配置信息高效查询）进行性能优化。
+    \item \textbf{UDP 网络编程}：理解 UDP 协议的无连接通信模型，实现与 X-Plane 仿真平台的数据对接，完成二进制飞行数据包的实时解析。
+    \item \textbf{多线程并发编程}：将渲染、网络通信、业务逻辑拆分到不同线程中执行，通过互斥锁等同步机制保证数据一致性。
+\end{enumerate}
+
+\subsection{能力目标}
+
+\begin{enumerate}[leftmargin=*]
+    \item 能够独立完成一个桌面级仿真系统的全流程开发：需求分析 $\rightarrow$ 模块设计 $\rightarrow$ 编码实现 $\rightarrow$ 测试调试 $\rightarrow$ 集成部署。
+    \item 能够针对\"大规模导航数据的快速空间检索\"等实际性能瓶颈，选择并实现合适的索引结构。
+    \item 能够通过抓包分析等方式逆向理解外部系统的二进制通信协议，并实现稳定对接。
+    \item 能够设计并实现高精度仪表盘的动态渲染系统，保障 60 FPS 以上的流畅刷新。
+    \item 能够构建模拟飞行数据发生器，在脱离外部仿真软件的条件下仍能进行完整的系统功能演示。
+    \item 能够撰写规范的项目文档，进行模块测试与系统集成。
+\end{enumerate}
+
+\subsection{素质目标}
+
+\begin{enumerate}[leftmargin=*]
+    \item 理解飞行模拟训练在航空安全教育中的重要意义，树立严谨的工程态度。
+    \item 在跨学科项目中，培养将复杂业务需求转化为高效数据结构与算法的系统思维能力。
+    \item 建立对仿真系统数据可靠性、安全关键系统确定性保证以及系统鲁棒性的认知。
+    \item 激发对航空电子、实时系统、图形渲染等底层技术的深入探索兴趣。
+\end{enumerate}
+
+% ================================================================
+\section{功能需求}
+
+% ================================================================
+
+\subsection{仪表显示系统}
+
+\subsubsection{PFD——主飞行显示器}
+
+PFD（Primary Flight Display）是驾驶舱中最核心的飞行信息显示单元，安装在机长侧仪表板正前方。本系统需要实现以下子组件：
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{姿态指示器（Attitude Indicator）}：包含天地背景渲染（蓝色天空 / 棕色地面）与俯仰、滚转刻度标尺。姿态数据（俯仰角 pitch、滚转角 roll）由飞行数据源实时驱动。需要解决的关键问题是地平线的平滑连续滚动——若采用整数截断值计算刻度位置，在浮点值微变但整数不变的时间窗口内（如 250.1 $\rightarrow$ 250.9 变化跨越 8 帧），刻度将产生可感知的\"视觉粘滞\"，破坏真实仪表的平滑感。
+    \item \textbf{空速带（Airspeed Tape）}：左侧垂直刻度带，当前指示空速（IAS）固定在刻度带中央，刻度值随速度变化上下滚动。需显示超速区（红黑相间条）和失速警告区。刻度带移动的像素密度需合理标定，初步估值为 4--6 px/kt。
+    \item \textbf{高度带（Altitude Tape）}：右侧垂直刻度带，当前气压高度固定在中央。需显示目标高度指示标记（Altitude Bug）。像素密度初步估值为 0.5--0.8 px/ft。
+    \item \textbf{航向带（Heading Tape）}：底部水平弧形刻度带，当前磁航向固定于中央，刻度向两侧展开。需标注 N/E/S/W 基准方位。像素密度初步估值为 4--6 px/deg。
+    \item \textbf{FMA（Flight Mode Annunciator）}：顶部模式通告栏，显示自动油门（A/THR）、横滚模式（ROLL）、俯仰模式（PITCH）、自动驾驶（AP）的当前激活状态。激活状态以绿色/品红色文字标识，未激活模式以灰色显示。
+    \item \textbf{垂直速度指示器（VSI）}：显示当前爬升/下降率，量程初步定为 $\pm 6000$ ft/min。
+    \item \textbf{辅助显示}：马赫数（M $>$ 0.4 时显示）、无线电高度（AGL $<$ 2500 ft 时显示）、AP 目标参数指示标记（航向/高度/速度 Bug）。
+\end{enumerate}
+
+\subsubsection{ND——导航显示器}
+
+ND（Navigation Display）提供飞机当前位置周边的导航态势信息。核心功能包括：
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{罗盘显示}：圆形或弧形罗盘，以磁航向为基准方向。
+    \item \textbf{航路叠加}：当前飞行计划的全部航段以彩色连线叠加在罗盘上，区分已飞航段、未飞航段与当前活跃航段。
+    \item \textbf{导航台与机场标记}：飞机周围的 VOR 台站、NDB 台站、航路点（Waypoint）和机场以不同图形符号绘制在地图背景上。
+    \item \textbf{量程切换}：支持多个缩放级别，初步规划为 5、10、20、40、80、160、320 NM 七档。
+    \item \textbf{显示模式切换}：至少支持 MAP 模式（罗盘 + 导航合成）和 PLN 模式（正北朝上、航路静态总览）。后续可扩展 VOR 模式（全向信标导航）和 APP 模式（ILS 仪表进近）。
+    \item \textbf{信息栏}：顶部显示地速（GS）、真空速（TAS）、风向风速、下一航点标识与距离。
+\end{enumerate}
+
+\textbf{关键性能挑战}：ND 每帧（16.67 ms @ 60 FPS）需要从导航数据库中筛选出飞机当前位置周围可见范围内的全部导航条目。若导航数据库达到数万至数十万条记录的规模，线性扫描全库的方式将超出单帧时间预算。因此需要引入空间索引结构来加速邻近查询——此方案的具体选型（如空间哈希网格、四叉树、R-Tree 等）需要根据数据规模进行实测对比后确定。这一决策将直接影响 ND 叠加层的渲染帧率，是项目早期需要优先解决的技术问题。
+
+\subsubsection{EICAS——发动机指示与机组告警系统}
+
+EICAS（Engine Indicating and Crew Alerting System）负责发动机参数显示与系统告警管理：
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{发动机参数显示}：
+    \begin{itemize}
+        \item N1 低压转子转速（\%）
+        \item EGT 排气温度（$^\circ$C），含超温红线标识
+        \item N2 高压转子转速（\%）
+        \item FF 燃油流量（lbs/hr 或 kg/hr）
+        \item 滑油压力/温度
+        \item 振动值
+    \end{itemize}
+    \item \textbf{燃油系统}：总油量 + 各油箱分布（左翼/中央/右翼），单位为 lbs 或 kg。
+    \item \textbf{CAS 机组告警灯面板}：以方形指示灯矩阵形式显示系统级告警，包括主警告（Master Warning，红色闪烁）、主注意（Master Caution，琥珀色）、以及液压、电气、引气、防冰等子系统的异常指示。
+    \item \textbf{GPWS 近地告警系统}：至少覆盖基本的 5 种告警模式——SINK RATE（下降率过大）、TERRAIN（地形接近率过高）、DON'T SINK（起飞后高度损失）、TOO LOW GEAR / TOO LOW FLAPS（起落架/襟翼未放下）、GLIDESLOPE（ILS 下滑道偏离），并包含着陆阶段的高度自动喊话（500、400、300、200、100、50、40、30、20、10 英尺）。告警需通过音频输出。
+\end{enumerate}
+
+\textbf{告警安全架构的考虑}：GPWS 属于生命安全关键系统范畴。若后续扩展 AI 辅助建议功能，必须确保 C 语言层的硬告警逻辑（基于确定性参数阈值判断）不可被任何概率性系统（如大语言模型）绕过或降级。这一点需要在架构设计阶段就予以明确。
+
+\subsection{FMC——飞行管理计算机}
+
+FMC（Flight Management Computer）是本系统中业务逻辑最复杂、交互密度最高的模块。需要以 CDU（Control Display Unit）的形式呈现完整的交互界面。
+
+\subsubsection{CDU 页面规划}
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{2.5cm} >{\raggedright\arraybackslash}p{11cm}}
+\toprule
+\textbf{页面} & \textbf{功能描述} \\
+\midrule
+IDENT & 显示机型、发动机型号、导航数据库有效期等静态信息。 \\
+\addlinespace
+RTE & 航路页面。输入起降机场 ICAO 代码，系统根据导航数据库自动计算并填充航路。若起降机场之间缺乏直接航路连接，需启动自动寻路算法生成中间航路点序列。 \\
+\addlinespace
+LEGS & 航路点详细列表，显示各航点标识、航段距离与累计距离。支持通过行选键（LSK）在指定位置插入或删除航点。 \\
+\addlinespace
+DEP ARR & 进离场程序选择。显示可用跑道、SID（标准仪表离场程序）和 STAR（标准终端进场程序）列表，供飞行员选择。 \\
+\addlinespace
+CLB / CRZ / DES & 爬升/巡航/下降性能页面。设置巡航高度、目标速度/马赫数、速度限制高度、下降终点高度等参数。 \\
+\addlinespace
+PROG & 航行进度。显示已飞距离、剩余距离、预计到达时间（ETA）、燃油估算。 \\
+\addlinespace
+NAV RAD & 导航无线电频率管理（COM1、COM2、NAV1、NAV2、应答机 XPDR、DME）。 \\
+\addlinespace
+PERF & 高级性能参数（成本指数 CI、备降机场、过渡高度等）。 \\
+\bottomrule
+\end{longtable}
+
+\subsubsection{航路自动规划——寻路算法选择}
+
+在两个机场之间没有直接航路边连接时，需要基于航路图进行自动寻路。这是一个典型的图论最短路径问题，需要考虑以下因素：
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{图的规模}：取决于导航数据库的实际规模。若仅包含手工录入的数十个中国机场，节点数在百量级，任何算法均可胜任。但若导入全球导航数据库，节点数可能达到数万至数十万量级，算法选择将直接影响响应时间。
+    \item \textbf{寻路算法}：初步选择 A* 算法。相比 Dijkstra，A* 通过启发函数引导搜索方向，在稀疏图中展开节点数显著减少。关键在于启发函数的选择——需要满足\"可纳性\"（admissibility，即 $h(n) \leq h^*(n)$，保证最优解）和\"一致性\"（consistency，避免重复展开已关闭节点）。
+    \item \textbf{启发函数}：考虑到航空航路位于地球椭球面上，候选项包括：
+    \begin{itemize}
+        \item Haversine 大圆距离：理论上最紧的可纳下界（球面上两点间的最短路径即大圆弧），但计算开销略高于欧几里得距离。
+        \item 简化球面余弦公式：计算较快，但在近距离时存在浮点精度问题。
+        \item 欧几里得直线距离（穿透地球）：仍然可纳（直线 $\leq$ 任何曲面路径），但下界过松会导致展开过多节点，退化为 Dijkstra。
+    \end{itemize}
+    初步倾向选择 Haversine 距离，需要在实测中验证计算开销是否可接受。
+    \item \textbf{图的存储结构}：候选方案包括：
+    \begin{itemize}
+        \item 邻接矩阵：空间 $O(V^2)$，对稀疏航路图（每个节点 3--5 条出边）浪费严重。
+        \item 链表邻接表：每条边独立分配节点，遍历时指针追逐导致缓存不友好，且大规模建图时海量 malloc 调用影响构建速度。
+        \item 链式前向星（Chain Forward-Star）：以三个并行数组（head、to、next）替代链表，边遍历为数组下标跳转，内存连续、缓存友好。但动态添加边时需要处理数组扩容。在 ACM 竞赛中是稀疏图存储的主流方案，但在实际工程 C 项目中的适用性需要评估。
+    \end{itemize}
+    \item \textbf{开放集与闭合集实现}：
+    \begin{itemize}
+        \item 开放集（待展开节点集合）：需要支持高效的最小值取出（extract-min）和插入/更新操作。候选方案为二叉最小堆（$O(\log N)$），进阶方案为配对堆或斐波那契堆（amortized $O(1)$ decrease-key，但 C 实现复杂）。
+        \item 闭合集（已展开节点集合）：当图节点数达到数万级别时，每次搜索前以 memset 清零整个数组的开销不可忽略。替代方案为\"世代标记\"（visit token）——以一个递增的整数作为当前世代的标记，O(1) 完成重置。
+    \end{itemize}
+\end{enumerate}
+
+上述所有算法决策将在导航数据库规模确定后进行实测验证。
+
+\subsubsection{CDU 按键面板}
+
+需要实现完整的物理按键布局，包括：
+\begin{itemize}
+    \item 功能键：RTE、LEGS、DEP ARR、CLB、CRZ、DES、PROG、INIT REF、DIR INTC、HOLD、FIX、NAV RAD、PREV PAGE、NEXT PAGE、PERF
+    \item 字母数字键：A--Z 全字母 + 0--9 数字 + 小数点
+    \item 编辑控制键：CLR（清除）、DEL（删除）、SP（空格）
+    \item EXEC 键：独立的执行键，用于激活航路修改
+    \item 行选键（LSK）：CDU 屏幕两侧各 6 个，共 12 个（L1--L6、R1--R6），用于选择屏幕上对应行的内容
+    \item 便签本（Scratchpad）：底部文本输入行，支持左对齐显示和闪烁光标
+\end{itemize}
+
+按键的视觉反馈（悬停高亮、点击闪烁）对交互体验有显著影响，但实现优先级可放在基础功能完成后。
+
+\subsection{飞行数据接入}
+
+\subsubsection{外部仿真平台对接}
+
+通过 UDP 协议对接 X-Plane 飞行仿真平台（实训要求版本为 X-Plane 11，后续视兼容情况决定是否适配 X-Plane 12），实现：
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{数据接收}：订阅飞行参数数据组（姿态角、空速、高度、垂直速度、航向、位置、发动机参数、无线电频率等），解析二进制 UDP 数据包，映射到内部的 FlightData 结构体。
+    \item \textbf{数据发送（反向控制）}：向 X-Plane 发送 DataRef 写入指令（如设置自动驾驶的目标高度、速度、航向）和命令触发（如模拟 FMC 按键）。
+\end{enumerate}
+
+\textbf{协议层面的不确定性}：X-Plane 的 UDP 协议文档覆盖不完整。已知的信息包括：
+\begin{itemize}
+    \item 使用 UDP 49000 端口（命令）和 49005 端口（数据）
+    \item 存在 RPOS（位置数据请求）和 DSEL（数据组选择）订阅机制
+    \item DATA 数据包为 N $\times$ 36 字节的二进制结构
+    \item DREF 写入和 CMND 命令发送的包格式需要实际抓包验证
+\end{itemize}
+
+如果实训要求从 XP11 迁移至 XP12，必须关注可能存在的协议变更——数据组索引编号重排、包标识字节差异、数据包长度变化、单位制统一（公制/英制）等问题。这部分的开发时间预算需要留有裕度。
+
+\subsubsection{模拟飞行数据发生器}
+
+开发一个独立于外部仿真平台的飞行数据模拟模块，在无需安装 X-Plane 的条件下也能进行完整的功能演示。该模块需要：
+
+\begin{enumerate}[leftmargin=*]
+    \item 模拟完整的起降循环：TAKEOFF $\rightarrow$ CLIMB $\rightarrow$ CRUISE $\rightarrow$ DESCENT $\rightarrow$ APPROACH $\rightarrow$ LANDING。
+    \item 生成在 B737 飞行包线范围内的合理参数值，包括 N1、EGT、燃油流量、马赫数、姿态角等。
+    \item 通过配置文件（如 \texttt{data\_source = mock | xplane}）切换数据源。
+\end{enumerate}
+
+模拟数据的真实性（尤其是垂直速度、发动机参数与飞行阶段的匹配度）是衡量该模块质量的关键。粗糙的模拟数据可能导致仪表显示与真实飞行逻辑不符，影响演示的可靠度。
+
+\subsection{客舱信息展示模块}
+
+通过 HTTP 协议接入在线地图 API（如高德地图），在浏览器端展示航班实时位置、飞行航迹和目的地信息。架构设想如下：
+
+\begin{itemize}
+    \item 后端：在 C 程序中内嵌轻量级 HTTP 服务器（监听 localhost 端口），提供 RESTful API 端点，返回当前飞机位置、航路信息和系统配置等 JSON 数据。
+    \item 前端：HTML/JavaScript 页面，加载在线地图，通过定时轮询（或 WebSocket）获取后端数据并更新飞机标记位置和航迹线。
+\end{itemize}
+
+前端地图的平滑动画（飞机图标的航向旋转、位置插值）和自动比例尺调整是提升视觉体验的关键细节，但需要配合后端数据接口的响应时间进行联调优化。
+
+\subsection{系统基础功能}
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{配置文件管理}：以 INI 格式管理窗口尺寸、网络端口、数据源选择、仪表开关、日志级别等参数，支持缺省值回退。
+    \item \textbf{日志系统}：分级日志（DEBUG/INFO/WARN/ERROR），线程安全，便于开发阶段的问题定位。
+    \item \textbf{多线程架构}：渲染主线程与数据接收线程分离。飞行数据通过互斥锁保护，渲染线程以快照（memcpy）方式获取数据，临界区应极短以最小化锁竞争。
+    \item \textbf{资源管理}：字体文件（TTF）、图片资源（PNG/纹理）的统一加载与释放。
+    \item \textbf{导航数据库}：从公开数据源（OpenFlights airports.dat、earth\_fix.dat、earth\_nav.dat 等）解析并加载机场、航路点、导航台数据，存储到内部数据结构中。
+\end{enumerate}
+
+% ================================================================
+\section{非功能需求}
+
+% ================================================================
+
+\subsection{性能指标}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{>{\raggedright\arraybackslash}p{5cm} >{\raggedright\arraybackslash}p{4cm} >{\raggedright\arraybackslash}p{5cm}}
+\toprule
+\textbf{指标} & \textbf{目标值} & \textbf{备注} \\
+\midrule
+渲染帧率 & $\geq$ 60 FPS & 含全部仪表同时刷新 \\
+数据刷新率 & 10--20 Hz & UDP 数据包接收频率 \\
+仪表响应延迟 & $<$ 50 ms & 数据到达 $\rightarrow$ 屏幕更新 \\
+导航邻域查询延迟 & $<$ 2 ms & ND 单帧空间查询 \\
+内存占用 & $<$ 500 MB & 正常运行稳态 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{可靠性要求}
+
+\begin{enumerate}[leftmargin=*]
+    \item UDP 数据包丢失、乱序或校验失败时，系统应具备容错处理，不发生段错误或死循环。
+    \item 在外部仿真平台未启动的情况下，仪表应显示默认零值，不弹出错误对话框、不退出。
+    \item 配置文件中的字段缺失时，所有参数应回退至预设默认值。
+    \item 所有动态分配的内存应有确定性的释放路径，长时间运行无明显内存泄漏。
+\end{enumerate}
+
+\subsection{可维护性要求}
+
+\begin{enumerate}[leftmargin=*]
+    \item 模块化设计：仪表、网络、数据结构三类模块职责明确，接口清晰，减少交叉依赖。
+    \item 仪表采用统一的抽象接口（初始化 $\rightarrow$ 更新 $\rightarrow$ 渲染 $\rightarrow$ 事件处理 $\rightarrow$ 销毁），新增仪表只需实现该接口并注册即可。
+    \item 源代码包含必要的注释，每个 \texttt{.c/.h} 文件头部给出模块功能说明与接口约定。
+    \item 编译通过 \texttt{-Wall -Wextra} 且零警告。
+\end{enumerate}
+
+\subsection{运行环境}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{>{\raggedright\arraybackslash}p{4cm} >{\raggedright\arraybackslash}p{10cm}}
+\toprule
+\textbf{类别} & \textbf{说明} \\
+\midrule
+操作系统 & Windows 10 / 11（64-bit） \\
+编译器 & MSYS2 MinGW-w64 + GCC \\
+图形库 & SDL2 2.32.10 + SDL2\_image 2.8.8 + SDL2\_ttf 2.24.0 + SDL2\_gfx 1.0.4 \\
+外部依赖 & 零运行时依赖：单个可执行文件 + 资源文件夹即可运行 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ================================================================
+\section{待解决的关键技术问题}
+
+% ================================================================
+
+以下问题在开题阶段尚无确定答案，属于需要在开发过程中通过实测、对比或逆向分析来解决的开放性问题。它们构成了本项目的核心技术风险。
+
+\subsection{空间索引结构的选型}
+
+导航数据库的规模取决于实际可获取的公开数据源。若仅包含手工录入的少量机场和航路点，线性扫描即可满足需求。但若导入 X-Plane 格式的全球导航数据库（预估规模为数十万条记录），ND 每帧的邻近查询将成为明确的性能瓶颈。
+
+候选的加速方案包括：
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{空间哈希网格（Spatial Hash Grid）}：将连续地理空间离散化为固定大小的网格单元，查询时仅检查目标位置周围的有限数量网格。优点是实现简单（本质上是哈希表 + 链表），C 语言实现友好，插入和查询均为 O(1)。缺点是需要合理选择网格大小——过大则单格内条目过多，过小则需检查过多邻域网格。
+    \item \textbf{四叉树（Quadtree）/ R-Tree}：自适应空间划分，理论上对不均匀分布的数据更友好。但在 C 语言中实现节点分裂、MBR 更新等操作复杂度较高。
+\end{enumerate}
+
+初步倾向选择空间哈希网格方案，并在此基础上探索\"航向优先邻域搜索\"——按飞机当前航向与各邻域网格中心方向的夹角排序搜索顺序，优先搜索前方网格，使航线方向上的导航条目最先被返回。这一优化是通用 GIS 库所不具备的领域定制能力。
+
+\subsection{A* 寻路的图规模与数据结构选择}
+
+航路图的规模直接影响 A* 算法的运行时表现。核心待决问题包括：
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{图的存储结构}：链式前向星 vs. 传统链表邻接表的性能差异需要在项目实际数据规模下进行基准测试后才能做出决策。前者的理论优势在于内存连续性和无指针追逐，但动态扩容的实现复杂度高于后者。
+    \item \textbf{启发函数精度 vs. 计算开销}：Haversine 大圆距离提供最紧的可纳下界，但涉及多次三角函数和反三角函数计算。若在数百次节点展开中累积的开销超过搜索方向引导带来的收益，可能需要考虑简化公式或查表法。
+    \item \textbf{高度层约束的处理}：部分航路存在最低/最高高度限制。是否将高度作为算法中的约束条件进行过滤，还是在图构建阶段就排除不合规的边，需要根据实际的导航数据格式决定。
+    \item \textbf{机场与航路网的连接}：机场本身通常不是航路图中的节点，需要在图构建时为机场建立到附近航路点的连接边。连接的建立机制（固定半径 vs. 最近 K 个航路点 vs. SID/STAR 门户点）需要设计。
+\end{enumerate}
+
+\subsection{X-Plane 通信协议的逆向与适配}
+
+X-Plane 的 UDP 协议虽然部分公开，但细节覆盖不全。需要在实际对接中解决的问题预计包括：
+\begin{enumerate}[leftmargin=*]
+    \item XP11 与 XP12 的数据组索引编号是否一致。若实训要求从 XP11 迁移至 XP12，这是一个潜在的断点。
+    \item DATA 数据包在多组订阅时的合并-分包机制。若 XP12 将全部数据组合并到一个大包发送，接收缓冲区大小需要相应调整。
+    \item 反向写入（DREF / CMND）的精确包格式校验，包括包总长度、字段对齐和空字节填充规则。
+\end{enumerate}
+
+对策是在架构上将协议解析设计为独立模块，与仪表显示逻辑解耦，便于在发现协议差异时快速替换或适配。
+
+\subsection{多线程数据同步策略}
+
+渲染线程（主线程）和 UDP 数据接收线程之间的数据交换是本项目中最关键的并发控制点。需要避免的典型问题包括：
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{数据竞争（Data Race）}：一写一读共享 FlightData 结构体时，若没有同步机制，可能出现读到半更新的脏数据。
+    \item \textbf{锁粒度不当}：若在整个渲染周期内持锁，UDP 线程将被阻塞，造成丢包——对于无连接的 UDP 而言丢包是不可恢复的。若锁粒度过细则死锁风险上升。
+    \item \textbf{死锁（Deadlock）}：当多个子系统各自持有独立的锁且存在交叉依赖时，可能形成循环等待。
+\end{enumerate}
+
+初步策略是采用\"Mutex Snapshot\"模式：UDP 线程获取写锁后 memcpy 写入，主线程获取读锁后 memcpy 读取快照。临界区仅包含一次 memcpy 操作，时间在微秒级。
+
+\subsection{告警音频的生成方式}
+
+GPWS 告警需要音频输出。两种候选方案各有利弊：
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{SDL2 音频回调实时合成}：通过波形合成算法（方波、正弦波、锯齿波）在回调函数中实时生成 PCM 数据填入音频缓冲区。优势是零外部音频文件依赖，程序完全自包含。劣势是音质有限，复杂的告警音（如滑音、脉冲序列）需要编写较复杂的合成逻辑。
+    \item \textbf{预录制 WAV 文件播放}：使用真实驾驶舱录音或专业合成的 WAV 文件。优势是音质好、真实感强。劣势是增加了外部资源文件依赖，需要额外管理音频文件的加载和切换。
+\end{enumerate}
+
+初步选择实时合成方案以保证项目的自包含性，同时在架构上预留 WAV 播放的扩展接口。
+
+\subsection{AI 辅助功能的可行性}
+
+在基本功能之外，有一个扩展构想：集成一个轻量级的大语言模型作为\"AI 副驾驶\"，根据当前飞行参数状态给出态势感知建议（如\"下降率偏大，注意控制\"、\"即将进入已知结冰区域\"等）。但此方向存在多项不确定性：
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{基座模型选择}：需要一个支持中文、可在消费级 GPU 上推理的开源模型。候选项包括 ChatGLM 系列、Qwen 系列等，但具体选型需评估推理延迟和显存占用。
+    \item \textbf{微调方案}：全参数微调对显存要求高（6B 模型全参数约需 48 GB），LoRA/QLoRA 等参数高效微调方法能否在保证效果的同时降低硬件门槛，需要实测。
+    \item \textbf{训练数据生成}：B737 驾驶舱场景的标注数据并非公开可获取的。若采用人工标注则成本过高，需要探索基于规则模板的自动生成方案。
+    \item \textbf{通信协议}：C 程序与 Python 推理服务之间的通信方式（HTTP 短连接 vs. WebSocket 长连接 vs. 其他 IPC 方案）需要权衡延迟、实现复杂度和可靠性。
+\end{enumerate}
+
+此模块风险较高，不列入核心功能范畴。若开发时间允许则作为加分项尝试集成。
+
+% ================================================================
+\section{开发计划概要}
+
+% ================================================================
+
+根据实训的时间安排，整体开发分为以下几个阶段：
+
+\begin{table}[H]
+\centering
+\begin{tabular}{>{\centering\arraybackslash}p{1.5cm} >{\raggedright\arraybackslash}p{6.5cm} >{\centering\arraybackslash}p{5cm}}
+\toprule
+\textbf{阶段} & \textbf{内容} & \textbf{预计时间} \\
+\midrule
+第1阶段 & 搭建工程骨架：SDL2 窗口创建、主循环框架、INI 配置文件解析器、分级日志系统、SDL 事件分发机制 & 第1--2天 \\
+\addlinespace
+第2阶段 & 仪表静态界面：PFD / ND / EICAS / FMC 四块核心仪表的布局设计、基础图形元素绘制、TTF 字体渲染 & 第3--5天 \\
+\addlinespace
+第3阶段 & 飞行数据对接：UDP socket 封装、X-Plane 协议解析、线程安全 FlightData 容器、模拟飞行数据发生器 & 第6--8天 \\
+\addlinespace
+第4阶段 & 仪表动态刷新：各仪表接入实时/模拟飞行数据，刻度带、指针、指示器实现连续动画 & 第9--11天 \\
+\addlinespace
+第5阶段 & FMC 核心逻辑：航路编辑交互流程、A* 寻路算法实现与启发函数标定、飞行计划数据结构与管理 & 第12--14天 \\
+\addlinespace
+第6阶段 & 并发优化、GPWS 音频告警、数据结构性能调优、客舱地图 HTTP 服务 & 第15--17天 \\
+\addlinespace
+第7阶段 & 全系统集成测试、帧率/内存性能剖析、Bug 修复、文档撰写与答辩材料准备 & 第18--20天 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{优先级策略}：核心仪表（PFD + ND + EICAS）+ FMC + 数据接入 构成项目的基本闭环，必须优先保证完整跑通。导航数据库扩展（导入大规模公开数据）、AI 副驾驶集成、WAV 音频替换等属于锦上添花的功能，视实际进度决定是否纳入。
+
+% ================================================================
+\section{交付物}
+
+% ================================================================
+
+\begin{enumerate}[leftmargin=*]
+    \item 完整可编译运行的源代码（含 Makefile，编译零错误零警告）
+    \item 可执行程序与必要的资源文件（字体、配置文件、导航数据文件）
+    \item 项目技术文档：系统架构说明、模块接口约定、构建与运行指南
+    \item 答辩演示材料（PPT 或等效文档）
+\end{enumerate}
+
+\vspace{1cm}
+
+\begin{center}
+\rule{0.4\textwidth}{0.4pt}
+
+{\small 本报告为开题阶段的需求分析。报告中标注为\"待定\"\"候选\"\"初步\"\"预估\"的内容，均属于在项目实际开发中需要进一步验证、对比或调整的开放性问题。最终的技术方案和实现细节以开发过程中的实测结果和迭代决策为准。}
+\end{center}
+
+\end{document}
